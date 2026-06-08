@@ -11,7 +11,7 @@ Provides:
 ## Features
 
 - **Active view**: shows currently attached agent panes with live state (running, permission, idle)
-- **Recent view** *(planned)*: the picker tab and resume routing exist, but the recent list is not yet populated
+- **Recent view**: ended sessions from all three tools, newest first, with one-key resume (`claude -r` / `opencode -s` / `codex resume`)
 - **Per-tool status pills**: independent indicators for each tool in the tmux status line
 - **Push-based state**: Claude Code hooks, OpenCode SSE, and Codex hooks — no screen scraping
 - **Shell wrappers**: `claude`, `opencode`, and `codex` shell functions shadow the real binaries for named session launch with automatic registration (`command <tool>` bypasses them)
@@ -132,7 +132,7 @@ discovered by the pane scanner within ~5 seconds.
 
 Active rows show a tool glyph (󰚩, , or ✦), state indicator, session name, directory, and tmux session. Selecting navigates to the pane.
 
-Recent rows are intended to show past sessions from all tools, with selection resuming the session (Claude Code: `claude -r <session_id>`; OpenCode: `opencode -s <session_id>`; Codex: `codex resume <session_id>`). The view and this routing are implemented, but the recent list is not yet populated — see `docs/IMPLEMENTATION.md`.
+Recent rows show ended sessions from all tools (newest first) with their directory and age. Selecting one resumes it — Claude Code `claude -r <session_id>`, OpenCode `opencode -s <session_id>`, Codex `codex resume <session_id>` — reusing the current pane if it's a shell in the same directory, otherwise opening a new window.
 
 ### Session naming
 

@@ -40,7 +40,7 @@ main
 All state mutations from any goroutine call `state.Reconciler.Reconcile()`, which holds a `sync.Mutex` and:
 
 1. Collects `ActivePanes()` from all registered providers (Claude, OpenCode, Codex stores)
-2. Collects `RecentSessions()` from all providers
+2. Collects recent (ended) sessions from the shared `Recents` ring
 3. Computes per-tool pill values: `permission|N` > `running|N` > `active|N` > `idle|0`
 4. Compares pills with previous — if changed: writes DB snapshot, bumps `@agents-gen`, sets pill options, refreshes tmux clients
 
@@ -246,7 +246,11 @@ Selection routing by tool:
 - Recent OpenCode: `opencode -s <session_id>` in session directory
 - Recent Codex: `codex resume <session_id>` in session directory
 
-> **Current status:** Both stores' `RecentSessions()` return `nil`, and `Reconcile()` rewrites the `recent` table from those providers on every pass — so the Recent tab and its selection routing are wired, but the list is not yet populated. Populating it is planned work: an in-memory recent ring per store surfaced via `RecentSessions()`, since side-channel writes directly to the `recent` table would be truncated by the next reconcile.
+### Recent sessions
+
+When a session is removed — Claude `SessionEnd` (or scanner prune), OpenCode SSE-drop or pane prune, Codex pane-close prune — the call site invokes `Reconciler.AddRecent`, which records it in a shared in-memory `Recents` ring (`state/recent.go`): most-recent first, deduped by `tool+session_id+host`, capped at 50, with empty name/dir filled from the `session_names` cache. `Reconcile()` sources `allRecent` from the ring and `WriteSnapshot` writes it to the `recent` table each pass.
+
+Because `WriteSnapshot` rewrites the `recent` table on every reconcile, the ring is seeded from the DB at startup (`db.LoadRecent`) so the list survives a server restart (the first reconcile re-persists the reloaded rows rather than wiping them). For OpenCode the representative session of a removed instance is captured (via `Store.RecentInfo`, read under lock before removal); Codex placeholders (no session id) are skipped.
 
 ## 8. Process Lifecycle
 

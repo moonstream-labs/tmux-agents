@@ -96,6 +96,7 @@ func (h *Handler) handleHook(w http.ResponseWriter, r *http.Request) {
 
 	case "SessionEnd":
 		if sess := h.store.Remove(payload.SessionID); sess != nil {
+			h.reconciler.AddRecent(state.ToolClaude, sess.ID, sess.Name, sess.CWD, sess.PaneTarget)
 			log.Printf("claude: session end id=%s name=%q", payload.SessionID, sess.Name)
 			changed = true
 		}

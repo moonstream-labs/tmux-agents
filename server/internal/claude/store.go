@@ -177,13 +177,6 @@ func (s *Store) ActivePanes() []state.PaneRow {
 	return rows
 }
 
-func (s *Store) RecentSessions() []state.RecentRow {
-	// Claude Code recent sessions are populated from history.jsonl
-	// by the scanner/watcher. For now, return empty — sessions move
-	// here when removed from active.
-	return nil
-}
-
 func (s *Store) All() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

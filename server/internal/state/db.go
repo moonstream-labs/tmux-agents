@@ -83,6 +83,30 @@ func (db *DB) LookupName(tool Tool, sessionID string) (name string, dir string) 
 	return
 }
 
+// LoadRecent reads persisted recent sessions, newest first. Used to seed the
+// in-memory Recents ring at startup so the list survives a server restart.
+func (db *DB) LoadRecent(limit int) []RecentRow {
+	rows, err := db.Query(
+		`SELECT tool, session_id, IFNULL(name,''), IFNULL(dir,''), IFNULL(updated,0), host, IFNULL(tmux_session,'')
+		 FROM recent ORDER BY updated DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []RecentRow
+	for rows.Next() {
+		var r RecentRow
+		var tool string
+		if err := rows.Scan(&tool, &r.SessionID, &r.Name, &r.Dir, &r.Updated, &r.Host, &r.TmuxSession); err != nil {
+			continue
+		}
+		r.Tool = Tool(tool)
+		out = append(out, r)
+	}
+	return out
+}
+
 func (db *DB) WriteSnapshot(panes []PaneRow, recent []RecentRow) error {
 	tx, err := db.Begin()
 	if err != nil {

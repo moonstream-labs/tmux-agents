@@ -221,8 +221,33 @@ func (s *Store) ActivePanes() []state.PaneRow {
 	return rows
 }
 
-func (s *Store) RecentSessions() []state.RecentRow {
-	// Recent sessions populated when instances are removed.
-	// For now, return empty — will be filled by removal path.
-	return nil
+// RecentInfo returns the representative session for the instance on a port (the
+// one ActivePanes would show), for recording it in the recent list. Read before
+// Remove so it runs under the lock. ok is false for an unknown/empty instance.
+func (s *Store) RecentInfo(port int) (sessionID, name, dir, paneTarget string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	inst, exists := s.instances[port]
+	if !exists {
+		return "", "", "", "", false
+	}
+	var best *Session
+	if inst.ActiveSessionID != "" {
+		best = inst.Sessions[inst.ActiveSessionID]
+	}
+	if best == nil {
+		for _, sess := range inst.Sessions {
+			if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
+				best = sess
+			}
+		}
+	}
+	if best == nil {
+		return "", "", "", "", false
+	}
+	name = best.Name
+	if name == "" {
+		name = inst.Name
+	}
+	return best.ID, name, best.Dir, inst.PaneTarget, true
 }

@@ -3,16 +3,18 @@ package state
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/moonstream-labs/tmux-agents/internal/tmux"
 )
 
-// PaneProvider is implemented by each tool's session store.
+// PaneProvider is implemented by each tool's session store. It reports only
+// active panes; ended sessions are recorded via Reconciler.AddRecent and held
+// in the shared Recents ring.
 type PaneProvider interface {
 	ActivePanes() []PaneRow
-	RecentSessions() []RecentRow
 }
 
 type Reconciler struct {
@@ -20,6 +22,7 @@ type Reconciler struct {
 	db        *DB
 	opts      *tmux.Options
 	providers []PaneProvider
+	recents   *Recents
 	gen       int
 	prevPill  map[Tool]string
 }
@@ -29,6 +32,7 @@ func NewReconciler(db *DB, opts *tmux.Options) *Reconciler {
 	return &Reconciler{
 		db:       db,
 		opts:     opts,
+		recents:  NewRecents(db, 0),
 		gen:      gen,
 		prevPill: make(map[Tool]string),
 	}
@@ -40,17 +44,27 @@ func (r *Reconciler) RegisterProvider(p PaneProvider) {
 	r.providers = append(r.providers, p)
 }
 
+// AddRecent records an ended session in the recent list (most-recent first).
+// paneTarget supplies the tmux session name; name/dir fall back to the
+// session_names cache. No-op for an empty session id (e.g. an unbound
+// placeholder). Call this before the follow-up Reconcile().
+func (r *Reconciler) AddRecent(tool Tool, sessionID, name, dir, paneTarget string) {
+	tmuxSession := paneTarget
+	if before, _, ok := strings.Cut(paneTarget, ":"); ok {
+		tmuxSession = before
+	}
+	r.recents.Add(tool, sessionID, name, dir, tmuxSession)
+}
+
 func (r *Reconciler) Reconcile() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	var allPanes []PaneRow
-	var allRecent []RecentRow
-
 	for _, p := range r.providers {
 		allPanes = append(allPanes, p.ActivePanes()...)
-		allRecent = append(allRecent, p.RecentSessions()...)
 	}
+	allRecent := r.recents.Rows()
 
 	// Compute per-tool pills.
 	pills := make(map[Tool]string)

@@ -75,7 +75,11 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		// Connection dropped and context not cancelled — instance may have died.
 		log.Printf("opencode: SSE loop ended for port=%d, removing instance", inst.Port)
+		sid, name, dir, target, ok := h.store.RecentInfo(payload.Port)
 		h.store.Remove(payload.Port)
+		if ok {
+			h.reconciler.AddRecent(state.ToolOpenCode, sid, name, dir, target)
+		}
 		h.reconciler.Reconcile()
 	}()
 

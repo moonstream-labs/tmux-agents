@@ -312,12 +312,6 @@ func rowFrom(sess *Session) state.PaneRow {
 	}
 }
 
-func (s *Store) RecentSessions() []state.RecentRow {
-	// Recent sessions are not yet populated (shared limitation with the Claude
-	// and OpenCode stores). Codex resume uses `codex resume <id>`.
-	return nil
-}
-
 func (s *Store) All() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

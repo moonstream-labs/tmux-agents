@@ -265,6 +265,7 @@ func main() {
 			// Check Claude store.
 			for _, s := range claudeStore.All() {
 				if s.PaneTarget == target {
+					reconciler.AddRecent(state.ToolClaude, s.ID, s.Name, s.CWD, s.PaneTarget)
 					claudeStore.Remove(s.ID)
 					log.Printf("scanner: pruned claude session=%s pane=%s", s.ID, target)
 					reconciler.Reconcile()
@@ -274,7 +275,11 @@ func main() {
 			// Check OpenCode store.
 			for _, p := range opencodeStore.Ports() {
 				if inst, ok := opencodeStore.Get(p); ok && inst.PaneTarget == target {
+					sid, name, dir, tgt, rok := opencodeStore.RecentInfo(p)
 					opencodeStore.Remove(p)
+					if rok {
+						reconciler.AddRecent(state.ToolOpenCode, sid, name, dir, tgt)
+					}
 					log.Printf("scanner: pruned opencode port=%d pane=%s", p, target)
 					reconciler.Reconcile()
 					return
@@ -282,6 +287,7 @@ func main() {
 			}
 			// Check Codex store.
 			if sess := codexStore.RemoveByTarget(target); sess != nil {
+				reconciler.AddRecent(state.ToolCodex, sess.ID, sess.Name, sess.CWD, sess.PaneTarget)
 				log.Printf("scanner: pruned codex session=%s pane=%s", sess.ID, target)
 				reconciler.Reconcile()
 				return
