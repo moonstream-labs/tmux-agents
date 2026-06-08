@@ -99,20 +99,22 @@ set -g @agents-auto-status-right 'on'
 ### Shell wrappers
 
 The shell integration defines `claude`, `opencode`, and `codex` functions that
-shadow the real binaries, adding session naming and server registration. Use
-`command <tool>` to bypass them.
+shadow the real binaries, adding server registration and an optional session
+name. The name is optional — a bare invocation launches immediately and the
+session is named from its own title (and any later `/rename`). Use
+`command <tool>` to bypass a wrapper.
 
 ```bash
 claude my-feature       # Launch Claude Code with name "my-feature"
-claude                  # Prompt for name, then launch
+claude                  # Launch immediately (named from its title)
 claude -r auth-refactor # Resume a named Claude Code session
 
 opencode trawl-dev      # Launch OpenCode with name on auto-assigned port
-opencode                # Prompt for name, then launch
+opencode                # Launch immediately (named from its title)
 
 codex my-fix            # Launch Codex with display name "my-fix"
-codex                   # Prompt for name, then launch
-codex resume            # Resume a Codex session (no name prompt)
+codex                   # Launch immediately (named from its title)
+codex resume            # Resume a Codex session
 ```
 
 The `claude` wrapper also injects `--dangerously-skip-permissions --effort max`
@@ -136,7 +138,8 @@ Recent rows show ended sessions from all tools (newest first) with their directo
 
 ### Session naming
 
-- At launch: `claude my-name`, `opencode my-name`, or `codex my-name` sets the name
+- At launch (optional): `claude my-name`, `opencode my-name`, or `codex my-name`
+  sets an initial name. Omit it and the session is named from its own title.
 - Mid-session renames/auto-titles are reflected for all three: Claude Code via
   fsnotify on the session JSONL, OpenCode via SSE `session.updated`, and Codex by
   reading its live session title from `~/.codex/state_*.sqlite` — the same value

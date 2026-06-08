@@ -3,53 +3,42 @@
 # Source this file from your .zshrc or .bashrc:
 #   source /path/to/tmux-agents/scripts/shell-integration.sh
 #
-# These functions shadow the 'claude' and 'opencode' binaries to add
-# session naming and registration with the tmux-agents server.
-# Use 'command claude' or 'command opencode' to bypass the wrappers.
+# These functions shadow the 'claude', 'opencode', and 'codex' binaries to add
+# server registration and an optional session name. The name is optional — a
+# bare invocation starts immediately and the session is named from its own
+# title. Use 'command <tool>' to bypass a wrapper.
 
 TMUX_AGENTS_SERVER="${TMUX_AGENTS_SERVER:-http://127.0.0.1:7077}"
 
-# claude -- Launch Claude Code with session name and registration
+# claude -- Launch Claude Code with an optional session name + registration
 #
 # Usage:
-#   claude <name> [args...]   Launch with name
-#   claude [args...]          Prompt for name interactively
-#   claude -r <name>          Resume a named session
+#   claude <name> [args...]   Launch with an explicit name
+#   claude [args...]          Launch immediately (named from its title / /rename)
+#   claude -r <id>            Resume a session
 #   claude -c                 Continue most recent session
 claude() {
   local name=""
 
-  # If first arg doesn't start with -, treat as session name.
+  # Optional leading session name: `claude my-feature`. A bare `claude` starts
+  # immediately; its name then comes from the session title (custom-title via
+  # /rename), which the title watcher and pane scanner pick up.
   if [[ $# -gt 0 && "$1" != -* ]]; then
     name="$1"
     shift
   fi
 
-  # If no name and not resuming/continuing, prompt for one.
-  local needs_name=true
-  for arg in "$@"; do
-    case "$arg" in
-      -r|--resume|-c|--continue) needs_name=false; break ;;
-    esac
-  done
-
-  if [[ -z "$name" && "$needs_name" == true ]]; then
-    printf "Session name: "
-    read -r name
-  fi
-
-  # Get current tmux pane target for registration.
-  local target=""
-  if [[ -n "$TMUX" ]]; then
+  # If named, pre-register the name + pane so the server binds it instantly
+  # (otherwise the scanner binds the pane within a few seconds via /proc).
+  if [[ -n "$name" && -n "$TMUX" ]]; then
+    local target
     target=$(tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null)
-  fi
-
-  # Pre-register with the agent server (fire-and-forget).
-  if [[ -n "$name" && -n "$target" ]]; then
-    curl -sf -X POST "$TMUX_AGENTS_SERVER/claude/register" \
-      -H 'Content-Type: application/json' \
-      -d "{\"name\":\"$name\",\"pane_target\":\"$target\",\"cwd\":\"$(pwd)\"}" \
-      >/dev/null 2>&1 &
+    if [[ -n "$target" ]]; then
+      curl -sf -X POST "$TMUX_AGENTS_SERVER/claude/register" \
+        -H 'Content-Type: application/json' \
+        -d "{\"name\":\"$name\",\"pane_target\":\"$target\",\"cwd\":\"$(pwd)\"}" \
+        >/dev/null 2>&1 &
+    fi
   fi
 
   # Build the command using 'command' to call the real binary.
@@ -61,13 +50,16 @@ claude() {
   "${cmd[@]}"
 }
 
-# opencode -- Launch OpenCode with session name and port registration
+# opencode -- Launch OpenCode with an optional session name and port registration
+#
+# The --port wiring and server registration are essential (the server discovers
+# the OpenCode instance via the --port flag in /proc); the name is optional.
 #
 # Usage:
-#   opencode <name> [args...]      Launch new session with name
+#   opencode <name> [args...]      Launch new session with an explicit name
 #   opencode -s <id> [args...]     Resume existing session by ID
 #   opencode -c [args...]          Continue last session
-#   opencode [args...]             Prompt for name interactively
+#   opencode [args...]             Launch immediately (named from its title)
 opencode() {
   local name=""
   local resuming=false
@@ -90,17 +82,12 @@ opencode() {
     prev="$arg"
   done
 
-  if [[ "$resuming" == false ]]; then
-    # If first arg doesn't start with -, treat as session name.
-    if [[ $# -gt 0 && "$1" != -* ]]; then
-      name="$1"
-      shift
-    fi
-
-    if [[ -z "$name" ]]; then
-      printf "Session name: "
-      read -r name
-    fi
+  # Optional leading session name: `opencode my-feature`. A bare `opencode`
+  # starts immediately; its name then comes from the session title (which the
+  # SSE watcher picks up). Resume/continue invocations never take a name.
+  if [[ "$resuming" == false && $# -gt 0 && "$1" != -* ]]; then
+    name="$1"
+    shift
   fi
 
   # Get current tmux pane target.
@@ -144,12 +131,12 @@ opencode() {
   command opencode --port "$port" "$@"
 }
 
-# codex -- Launch Codex with a display name registered with the tmux-agents server
+# codex -- Launch Codex with an optional display name registered with the server
 #
 # Usage:
-#   codex <name> [args...]   Launch with display name "<name>"
-#   codex [args...]          Launch (prompts for a name)
-#   codex resume [args...]   Resume; no name prompt
+#   codex <name> [args...]   Launch with an explicit display name "<name>"
+#   codex [args...]          Launch immediately (named from its own title)
+#   codex resume [args...]   Resume an existing session
 #
 # Codex has no native session name, so the name is used only by tmux-agents for
 # the navigator/pill. Codex self-reports its tmux pane via $TMUX_PANE in its
@@ -158,22 +145,17 @@ opencode() {
 # Use 'command codex' to bypass this wrapper.
 codex() {
   local name=""
-  local skip_name=false
 
-  # 'resume'/'exec' subcommands or a flag-first invocation skip the name prompt.
+  # Optional leading display name: `codex my-feature`. A bare `codex`, the
+  # 'resume'/'exec' subcommands, or a flag-first invocation start immediately;
+  # the name is then taken from Codex's own thread title.
   case "${1:-}" in
-    resume | exec | -*) skip_name=true ;;
+    "" | resume | exec | -*) ;;
+    *)
+      name="$1"
+      shift
+      ;;
   esac
-
-  if [[ "$skip_name" == false && $# -gt 0 && "$1" != -* ]]; then
-    name="$1"
-    shift
-  fi
-
-  if [[ -z "$name" && "$skip_name" == false ]]; then
-    printf "Session name: "
-    read -r name
-  fi
 
   # Pre-register the name with the agent server, keyed by this pane
   # (fire-and-forget). The SessionStart hook claims it by pane target.
