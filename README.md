@@ -117,7 +117,7 @@ codex                   # Launch immediately (named from its title)
 codex resume            # Resume a Codex session
 ```
 
-The `claude` wrapper also injects `--dangerously-skip-permissions --effort max`
+The `claude` wrapper also injects `--dangerously-skip-permissions`
 into every launch; the `codex` wrapper leaves approvals at their default so the
 permission pill stays meaningful (the pill shows Codex's own live session title; a
 `codex <name>` wrapper name is used until Codex assigns one). All wrappers register

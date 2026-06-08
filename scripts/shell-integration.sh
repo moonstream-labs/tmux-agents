@@ -44,7 +44,7 @@ claude() {
   # Build the command using 'command' to call the real binary.
   local -a cmd=(command claude)
   [[ -n "$name" ]] && cmd+=(-n "$name")
-  cmd+=(--dangerously-skip-permissions --effort max)
+  cmd+=(--dangerously-skip-permissions)
   cmd+=("$@")
 
   "${cmd[@]}"
