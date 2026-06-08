@@ -17,13 +17,13 @@ type Session struct {
 }
 
 type Instance struct {
-	Port             int
-	PaneTarget       string
-	Name             string // initial name from wrapper
-	ActiveSessionID  string // hint from -s flag on resume
-	Sessions         map[string]*Session
-	cancel           context.CancelFunc
-	UpdatedAt        time.Time
+	Port            int
+	PaneTarget      string
+	Name            string // initial name from wrapper
+	ActiveSessionID string // hint from -s flag on resume
+	Sessions        map[string]*Session
+	cancel          context.CancelFunc
+	UpdatedAt       time.Time
 }
 
 type Store struct {

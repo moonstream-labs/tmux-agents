@@ -155,28 +155,6 @@ func (s *Store) matchPending(cwd string) (*pendingReg, int) {
 	return nil, -1
 }
 
-// MatchPendingByTarget finds a pending registration by pane target.
-func (s *Store) MatchPendingByTarget(target string) (*Session, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := len(s.pending) - 1; i >= 0; i-- {
-		if s.pending[i].PaneTarget == target {
-			reg := s.pending[i]
-			s.pending = append(s.pending[:i], s.pending[i+1:]...)
-			// Create a placeholder session — will be finalized when hook arrives.
-			sess := &Session{
-				Name:       reg.Name,
-				PaneTarget: reg.PaneTarget,
-				CWD:        reg.CWD,
-				State:      state.StateUnknown,
-				UpdatedAt:  time.Now(),
-			}
-			return sess, true
-		}
-	}
-	return nil, false
-}
-
 func (s *Store) ActivePanes() []state.PaneRow {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -83,62 +83,6 @@ func (db *DB) LookupName(tool Tool, sessionID string) (name string, dir string) 
 	return
 }
 
-func (db *DB) WritePanesSnapshot(panes []PaneRow) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec("DELETE FROM panes"); err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO panes
-		(target, tool, state, session_id, name, dir, updated, host)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, p := range panes {
-		if _, err := stmt.Exec(p.Target, p.Tool, p.State, p.SessionID, p.Name, p.Dir, p.Updated, p.Host); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-func (db *DB) WriteRecentSnapshot(recent []RecentRow) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec("DELETE FROM recent"); err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO recent
-		(tool, session_id, name, dir, updated, host, tmux_session)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, r := range recent {
-		if _, err := stmt.Exec(r.Tool, r.SessionID, r.Name, r.Dir, r.Updated, r.Host, r.TmuxSession); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
 func (db *DB) WriteSnapshot(panes []PaneRow, recent []RecentRow) error {
 	tx, err := db.Begin()
 	if err != nil {

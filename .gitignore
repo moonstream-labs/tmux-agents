@@ -1,1 +1,6 @@
 upcoming/
+
+# Local, machine-specific skill symlinks (absolute paths into ~/agents)
+.claude/ast-grep
+.claude/bmgrep
+.claude/trawl

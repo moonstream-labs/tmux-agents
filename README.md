@@ -11,10 +11,10 @@ Provides:
 ## Features
 
 - **Active view**: shows currently attached agent panes with live state (running, permission, idle)
-- **Recent view**: shows recently updated sessions from both tools
+- **Recent view** *(planned)*: the picker tab and resume routing exist, but the recent list is not yet populated
 - **Dual status pills**: independent indicators per tool in the tmux status line
 - **Push-based state**: Claude Code hooks and OpenCode SSE — no screen scraping
-- **Wrapper aliases**: `cc()` and `oc()` for named session launch with automatic registration
+- **Shell wrappers**: `claude` and `opencode` shell functions shadow the real binaries for named session launch with automatic registration (`command claude` / `command opencode` bypass them)
 - **Fallback discovery**: pane scanner finds sessions started without wrappers
 
 ## Requirements
@@ -25,10 +25,11 @@ Provides:
 | `bash` | >= 4 | plugin scripts |
 | `fzf` | any | popup picker |
 | `sqlite3` | any | state DB reads from picker |
-| `go` | >= 1.22 | build server binary |
+| `go` | >= 1.26 | build server binary |
 | `curl` | any | fzf live reload, wrapper registration |
 | `claude` | any | Claude Code sessions |
 | `opencode` | any | OpenCode sessions |
+| `python3` | any | OpenCode wrapper auto-rename (optional) |
 
 Linux is currently required (`/proc` for process inspection, `flock`).
 
@@ -56,7 +57,7 @@ Add to your `.zshrc` or `.bashrc`:
 source ~/.local/share/tmux/plugins/tmux-agents/scripts/shell-integration.sh
 ```
 
-This provides the `cc()` and `oc()` wrapper functions.
+This provides the `claude` and `opencode` wrapper functions.
 
 ### 4. Configure tmux
 
@@ -85,18 +86,25 @@ set -g @agents-auto-status-right 'on'
 
 ## Usage
 
-### Wrapper functions
+### Shell wrappers
+
+The shell integration defines `claude` and `opencode` functions that shadow the
+real binaries, adding session naming and server registration. Use `command claude`
+or `command opencode` to bypass them.
 
 ```bash
-cc my-feature          # Launch Claude Code with name "my-feature"
-cc                     # Prompt for name, then launch
-cc -r auth-refactor    # Resume a named Claude Code session
+claude my-feature       # Launch Claude Code with name "my-feature"
+claude                  # Prompt for name, then launch
+claude -r auth-refactor # Resume a named Claude Code session
 
-oc trawl-dev           # Launch OpenCode with name on auto-assigned port
-oc                     # Prompt for name, then launch
+opencode trawl-dev      # Launch OpenCode with name on auto-assigned port
+opencode                # Prompt for name, then launch
 ```
 
-Both wrappers register the session with the background server automatically. Sessions started without wrappers are discovered by the pane scanner within 10 seconds.
+The `claude` wrapper also injects `--dangerously-skip-permissions --effort max`
+into every launch. Both wrappers register the session with the background server
+automatically. Sessions started without the wrappers are discovered by the pane
+scanner within ~5 seconds.
 
 ### Navigator picker
 
@@ -107,13 +115,11 @@ Both wrappers register the session with the background server automatically. Ses
 
 Active rows show a tool glyph (󰚩 or ), state indicator, session name, directory, and tmux session. Selecting navigates to the pane.
 
-Recent rows show past sessions from both tools. Selecting resumes the session:
-- Claude Code: `claude -r <session_id>`
-- OpenCode: `opencode -s <session_id>`
+Recent rows are intended to show past sessions from both tools, with selection resuming the session (Claude Code: `claude -r <session_id>`; OpenCode: `opencode -s <session_id>`). The view and this routing are implemented, but the recent list is not yet populated — see `docs/IMPLEMENTATION.md`.
 
 ### Session naming
 
-- At launch: `cc my-name` or `oc my-name` passes the name to the tool
+- At launch: `claude my-name` or `opencode my-name` passes the name to the tool
 - Mid-session: use `/rename` in either tool — the server detects changes automatically
   - Claude Code: via fsnotify on JSONL files
   - OpenCode: via SSE `session.updated` events
@@ -164,7 +170,7 @@ See `docs/IMPLEMENTATION.md` for full details.
 - **No rows in picker**: check server health with `curl http://127.0.0.1:7077/healthz`
 - **Pills missing**: ensure status modules are in `status-right`
 - **Sessions not appearing**: check `systemctl --user status tmux-agents` and server logs via `journalctl --user -u tmux-agents`
-- **Claude sessions unnamed**: sessions started without `cc()` have no name until `/rename` is used
+- **Claude sessions unnamed**: sessions started without the `claude` wrapper have no name until `/rename` is used
 
 ## License
 

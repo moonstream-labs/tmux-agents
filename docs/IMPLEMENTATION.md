@@ -20,14 +20,14 @@
 main
  ├─ net/http.ListenAndServe
  │   POST /claude/hook         (Claude Code hook receiver)
- │   POST /claude/register     (pre-registration from cc() wrapper)
- │   POST /opencode/register   (instance registration from oc() wrapper)
+ │   POST /claude/register     (pre-registration from claude wrapper)
+ │   POST /opencode/register   (instance registration from opencode wrapper)
  │   GET  /opencode/port       (port assignment)
  │   GET  /healthz
  │
  ├─ claude.WatchTitles         (fsnotify on ~/.claude/projects/*/*.jsonl)
  ├─ claude.ScanActiveSessions  (startup: scan ~/.claude/sessions/*.json)
- ├─ tmux.RunScanner            (periodic 10s: pane discovery + target assignment)
+ ├─ tmux.RunScanner            (periodic 5s: pane discovery + target assignment)
  ├─ [per OC instance] sse.Client (GET /event on OpenCode server)
  ├─ heartbeat ticker           (1s: write @agents-server-ts)
  └─ pending prune ticker       (30s: remove stale pre-registrations)
@@ -68,6 +68,15 @@ CREATE TABLE recent (
   tmux_session TEXT,
   PRIMARY KEY(tool, session_id, host)
 );
+
+CREATE TABLE session_names (   -- persistent name cache; survives restarts
+  tool       TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  dir        TEXT,
+  updated    INTEGER,
+  PRIMARY KEY(tool, session_id)
+);
 ```
 
 ### tmux Signaling Options
@@ -101,7 +110,7 @@ Claude Code hooks (`type: "http"`, `async: true`) POST JSON to `/claude/hook`. C
 
 ### Pane Correlation
 
-1. `cc()` wrapper pre-registers `{name, pane_target, cwd}` via `POST /claude/register`
+1. The `claude` shell wrapper (which shadows the real binary and injects `--dangerously-skip-permissions --effort max`) pre-registers `{name, pane_target, cwd}` via `POST /claude/register`
 2. When `SessionStart` hook fires, server matches by pane target verification or CWD
 3. Pane scanner fallback: walks process tree from pane PID, finds `~/.claude/sessions/<pid>.json`
 
@@ -113,19 +122,21 @@ fsnotify watches `~/.claude/projects/*/` for JSONL writes. On write, tails last 
 
 ### State via SSE
 
-Each OpenCode TUI instance runs an embedded HTTP server. The `oc()` wrapper passes `--port <N>` and registers with the Go server.
+Each OpenCode TUI instance runs an embedded HTTP server. The `opencode` shell wrapper passes `--port <N>` and registers with the Go server.
 
 Per-instance SSE goroutine connects to `GET /event`:
 
 | SSE Event | State Transition |
 |---|---|
 | `session.idle` | → idle |
-| `message.part.updated` | → running |
+| `session.status` | → idle/running (maps OpenCode status idle/busy/retry) |
+| `message.part.updated` | → running (only when not already idle — avoids racing a late idle) |
 | `permission.asked` | → permission |
 | `permission.replied` | → re-check /session/status |
 | `session.created` | Register session |
 | `session.updated` | Re-fetch metadata (catches renames) |
 | `session.deleted` | Remove session |
+| `session.error` | → idle |
 | `server.connected` | Fetch all sessions |
 
 Connection loss triggers exponential backoff retry (1s → 30s max).
@@ -144,7 +155,7 @@ Connection loss triggers exponential backoff retry (1s → 30s max).
 
 ## 5. Pane Scanner Fallback
 
-Background goroutine (10s interval) runs `tmux list-panes -a`. For each pane:
+Background goroutine (5s interval) runs `tmux list-panes -a`. For each pane:
 
 - Running `claude`: walks `/proc` tree to find `~/.claude/sessions/<pid>.json`, assigns pane target to existing session or registers new one
 - Running `opencode`: discovers `--port` flag from `/proc/<pid>/cmdline`, registers SSE connection
@@ -161,6 +172,8 @@ Selection routing by tool:
 - Active: navigate to tmux pane (both tools)
 - Recent Claude: `claude -r <session_id>`
 - Recent OpenCode: `opencode -s <session_id>` in session directory
+
+> **Current status:** Both stores' `RecentSessions()` return `nil`, and `Reconcile()` rewrites the `recent` table from those providers on every pass — so the Recent tab and its selection routing are wired, but the list is not yet populated. Populating it is planned work: an in-memory recent ring per store surfaced via `RecentSessions()`, since side-channel writes directly to the `recent` table would be truncated by the next reconcile.
 
 ## 7. Process Lifecycle
 

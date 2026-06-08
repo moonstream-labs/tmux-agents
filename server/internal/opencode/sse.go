@@ -395,4 +395,3 @@ func coalesce(values ...string) string {
 	}
 	return ""
 }
-
