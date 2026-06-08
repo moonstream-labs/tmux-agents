@@ -1,20 +1,20 @@
 # tmux-agents
 
-A tmux plugin for navigating active and recent Claude Code and OpenCode coding agent sessions.
+A tmux plugin for navigating active and recent Claude Code, OpenCode, and Codex coding agent sessions.
 
 Provides:
 
 - a popup navigator (`prefix + o`)
-- dual status pills for Claude Code (󰚩) and OpenCode ()
+- per-tool status pills for Claude Code (󰚩), OpenCode (), and Codex (✦)
 - push-based session tracking via a Go background server
 
 ## Features
 
 - **Active view**: shows currently attached agent panes with live state (running, permission, idle)
 - **Recent view** *(planned)*: the picker tab and resume routing exist, but the recent list is not yet populated
-- **Dual status pills**: independent indicators per tool in the tmux status line
-- **Push-based state**: Claude Code hooks and OpenCode SSE — no screen scraping
-- **Shell wrappers**: `claude` and `opencode` shell functions shadow the real binaries for named session launch with automatic registration (`command claude` / `command opencode` bypass them)
+- **Per-tool status pills**: independent indicators for each tool in the tmux status line
+- **Push-based state**: Claude Code hooks, OpenCode SSE, and Codex hooks — no screen scraping
+- **Shell wrappers**: `claude`, `opencode`, and `codex` shell functions shadow the real binaries for named session launch with automatic registration (`command <tool>` bypasses them)
 - **Fallback discovery**: pane scanner finds sessions started without wrappers
 
 ## Requirements
@@ -29,6 +29,7 @@ Provides:
 | `curl` | any | fzf live reload, wrapper registration |
 | `claude` | any | Claude Code sessions |
 | `opencode` | any | OpenCode sessions |
+| `codex` | >= 0.130 | Codex sessions (lifecycle hooks; enabled by default) |
 | `python3` | any | OpenCode wrapper auto-rename (optional) |
 
 Linux is currently required (`/proc` for process inspection, `flock`).
@@ -49,6 +50,14 @@ git clone https://github.com/moonstream-labs/tmux-agents.git \
 
 Merge the contents of `.claude/hooks.json` into your `~/.claude/settings.json`. These hooks allow the server to track Claude Code session state in real time.
 
+### 2b. Add Codex hooks
+
+`scripts/install.sh` prints a ready-to-merge `~/.codex/hooks.json` that points every
+Codex lifecycle event at `scripts/codex-hook.sh`. Codex only supports command hooks,
+so the shim forwards each event (received on stdin, plus the pane via `$TMUX_PANE`)
+to the server. After merging, start Codex and run `/hooks` once to review and trust
+the hook (or launch with `--dangerously-bypass-hook-trust`).
+
 ### 3. Source shell integration
 
 Add to your `.zshrc` or `.bashrc`:
@@ -57,7 +66,7 @@ Add to your `.zshrc` or `.bashrc`:
 source ~/.local/share/tmux/plugins/tmux-agents/scripts/shell-integration.sh
 ```
 
-This provides the `claude` and `opencode` wrapper functions.
+This provides the `claude`, `opencode`, and `codex` wrapper functions.
 
 ### 4. Configure tmux
 
@@ -75,6 +84,7 @@ run-shell ~/.local/share/tmux/plugins/tmux-agents/agents.tmux
 
 ```tmux
 set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_opencode.sh)"
+set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_codex.sh)"
 set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_claude.sh)"
 ```
 
@@ -88,9 +98,9 @@ set -g @agents-auto-status-right 'on'
 
 ### Shell wrappers
 
-The shell integration defines `claude` and `opencode` functions that shadow the
-real binaries, adding session naming and server registration. Use `command claude`
-or `command opencode` to bypass them.
+The shell integration defines `claude`, `opencode`, and `codex` functions that
+shadow the real binaries, adding session naming and server registration. Use
+`command <tool>` to bypass them.
 
 ```bash
 claude my-feature       # Launch Claude Code with name "my-feature"
@@ -99,12 +109,19 @@ claude -r auth-refactor # Resume a named Claude Code session
 
 opencode trawl-dev      # Launch OpenCode with name on auto-assigned port
 opencode                # Prompt for name, then launch
+
+codex my-fix            # Launch Codex with display name "my-fix"
+codex                   # Prompt for name, then launch
+codex resume            # Resume a Codex session (no name prompt)
 ```
 
 The `claude` wrapper also injects `--dangerously-skip-permissions --effort max`
-into every launch. Both wrappers register the session with the background server
-automatically. Sessions started without the wrappers are discovered by the pane
-scanner within ~5 seconds.
+into every launch; the `codex` wrapper leaves approvals at their default so the
+permission pill stays meaningful (the pill shows Codex's own live session title; a
+`codex <name>` wrapper name is used until Codex assigns one). All wrappers register
+the session with the
+background server automatically. Sessions started without the wrappers are
+discovered by the pane scanner within ~5 seconds.
 
 ### Navigator picker
 
@@ -113,16 +130,18 @@ scanner within ~5 seconds.
 - Select: Enter
 - Abort: Esc or Ctrl-c
 
-Active rows show a tool glyph (󰚩 or ), state indicator, session name, directory, and tmux session. Selecting navigates to the pane.
+Active rows show a tool glyph (󰚩, , or ✦), state indicator, session name, directory, and tmux session. Selecting navigates to the pane.
 
-Recent rows are intended to show past sessions from both tools, with selection resuming the session (Claude Code: `claude -r <session_id>`; OpenCode: `opencode -s <session_id>`). The view and this routing are implemented, but the recent list is not yet populated — see `docs/IMPLEMENTATION.md`.
+Recent rows are intended to show past sessions from all tools, with selection resuming the session (Claude Code: `claude -r <session_id>`; OpenCode: `opencode -s <session_id>`; Codex: `codex resume <session_id>`). The view and this routing are implemented, but the recent list is not yet populated — see `docs/IMPLEMENTATION.md`.
 
 ### Session naming
 
-- At launch: `claude my-name` or `opencode my-name` passes the name to the tool
-- Mid-session: use `/rename` in either tool — the server detects changes automatically
-  - Claude Code: via fsnotify on JSONL files
-  - OpenCode: via SSE `session.updated` events
+- At launch: `claude my-name`, `opencode my-name`, or `codex my-name` sets the name
+- Mid-session renames/auto-titles are reflected for all three: Claude Code via
+  fsnotify on the session JSONL, OpenCode via SSE `session.updated`, and Codex by
+  reading its live session title from `~/.codex/state_*.sqlite` — the same value
+  `codex resume` shows — refreshed ~every 5s. A `codex <name>` wrapper name is used as
+  the label until Codex assigns its own title.
 
 ## Configuration
 
@@ -152,6 +171,7 @@ Internal options (managed by the server):
 
 - `@agents-claude-pill` — Claude Code state and count
 - `@agents-opencode-pill` — OpenCode state and count
+- `@agents-codex-pill` — Codex state and count
 - `@agents-gen` — generation counter for picker reload
 - `@agents-server-ts` — server heartbeat
 

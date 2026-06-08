@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/moonstream-labs/tmux-agents/internal/claude"
+	"github.com/moonstream-labs/tmux-agents/internal/codex"
 	"github.com/moonstream-labs/tmux-agents/internal/opencode"
 	"github.com/moonstream-labs/tmux-agents/internal/state"
 	"github.com/moonstream-labs/tmux-agents/internal/tmux"
@@ -71,6 +72,12 @@ func main() {
 	reconciler.RegisterProvider(opencodeStore)
 	opencodeHandler := opencode.NewHandler(opencodeStore, reconciler)
 
+	// --- Codex ---
+	codexStore := codex.NewStore()
+	codexThreads := codex.NewThreadReader()
+	reconciler.RegisterProvider(codexStore)
+	codexHandler := codex.NewHandler(codexStore, reconciler)
+
 	// Initial reconcile after startup recovery.
 	reconciler.Reconcile()
 
@@ -79,6 +86,7 @@ func main() {
 
 	claudeHandler.RegisterRoutes(mux)
 	opencodeHandler.RegisterRoutes(mux)
+	codexHandler.RegisterRoutes(mux)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -88,6 +96,7 @@ func main() {
 			"uptime":             time.Since(startTime).Seconds(),
 			"claude_sessions":    len(claudeStore.All()),
 			"opencode_instances": len(opencodeStore.Ports()),
+			"codex_sessions":     len(codexStore.All()),
 		})
 	})
 
@@ -124,6 +133,7 @@ func main() {
 				return
 			case <-ticker.C:
 				claudeStore.PruneStalePending(2 * time.Minute)
+				codexStore.PruneStalePending(2 * time.Minute)
 			}
 		}
 	}()
@@ -191,6 +201,51 @@ func main() {
 			log.Printf("scanner: discovered opencode port=%d pane=%s", port, target)
 			return true
 		},
+		OnCodexDiscovered: func(target, cwd string, pid int) {
+			changed := false
+			// Resolve the exact session id from the codex process's open rollout
+			// file — avoids cwd ambiguity when sessions share a directory.
+			sid := tmux.FindCodexSessionForPaneTree(pid)
+			if sid != "" {
+				sess, ok := codexStore.SessionForTarget(target)
+				if !ok || sess.ID != sid {
+					// New pane, or a different session resumed into it: (re)bind.
+					if ok {
+						codexStore.RemoveByTarget(target)
+					}
+					codexStore.Upsert(sid, cwd, target) // claims a wrapper-pending name, if any
+					changed = true
+				}
+				// Name the session from Codex's threads DB. A `/rename` (or a
+				// Codex-generated summary) — a title NOT derived from the first user
+				// message — is adopted and cached. Codex resets the title to the
+				// first-message form on resume; for that auto/reset form we restore
+				// the last cached custom name instead, so a rename stays stable
+				// across exit/resume.
+				if th, ok := codexThreads.ByID(sid); ok {
+					if !th.IsAutoTitle() {
+						if codexStore.SetName(sid, th.Title) {
+							changed = true
+						}
+					} else {
+						name, _ := db.LookupName(state.ToolCodex, sid)
+						if name == "" {
+							name = th.Title
+						}
+						if codexStore.SetName(sid, name) {
+							changed = true
+						}
+					}
+				}
+			} else if _, ok := codexStore.SessionForTarget(target); !ok {
+				// Couldn't read the rollout fd — show a bare (unnamed) placeholder
+				// rather than risk a wrong cwd-matched title.
+				changed = codexStore.EnsurePlaceholder(target, cwd, "")
+			}
+			if changed {
+				reconciler.Reconcile()
+			}
+		},
 		GetTrackedTargets: func() []string {
 			var targets []string
 			for _, s := range claudeStore.All() {
@@ -203,6 +258,7 @@ func main() {
 					targets = append(targets, inst.PaneTarget)
 				}
 			}
+			targets = append(targets, codexStore.TrackedTargets()...)
 			return targets
 		},
 		OnPaneGone: func(target string) {
@@ -223,6 +279,12 @@ func main() {
 					reconciler.Reconcile()
 					return
 				}
+			}
+			// Check Codex store.
+			if sess := codexStore.RemoveByTarget(target); sess != nil {
+				log.Printf("scanner: pruned codex session=%s pane=%s", sess.ID, target)
+				reconciler.Reconcile()
+				return
 			}
 		},
 	})

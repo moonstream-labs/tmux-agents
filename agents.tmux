@@ -39,9 +39,13 @@ if [[ "$AUTO_STATUS_RIGHT" == "on" || "$AUTO_STATUS_RIGHT" == "yes" || "$AUTO_ST
 
     OC_FRAGMENT="#($SCRIPTS_DIR/status_opencode.sh)"
     CC_FRAGMENT="#($SCRIPTS_DIR/status_claude.sh)"
+    CX_FRAGMENT="#($SCRIPTS_DIR/status_codex.sh)"
 
     if [[ "$CURRENT_STATUS_RIGHT" != *"$OC_FRAGMENT"* ]]; then
         CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${OC_FRAGMENT}"
+    fi
+    if [[ "$CURRENT_STATUS_RIGHT" != *"$CX_FRAGMENT"* ]]; then
+        CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${CX_FRAGMENT}"
     fi
     if [[ "$CURRENT_STATUS_RIGHT" != *"$CC_FRAGMENT"* ]]; then
         CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${CC_FRAGMENT}"

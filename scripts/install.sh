@@ -41,13 +41,33 @@ cat << 'HOOKS'
 }
 HOOKS
 echo ""
+echo "1b. (Codex) Add Codex lifecycle hooks to ~/.codex/hooks.json:"
+echo '   (merge into existing "hooks" object if present)'
+echo ""
+CODEX_SHIM="$REPO_DIR/scripts/codex-hook.sh"
+cat <<CODEXHOOKS
+{
+  "hooks": {
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }],
+    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "$CODEX_SHIM" }] }]
+  }
+}
+CODEXHOOKS
+echo ""
+echo "   Then start Codex and run /hooks to review and trust the new hook"
+echo "   (or launch once with --dangerously-bypass-hook-trust)."
+echo ""
 echo "2. Source the shell integration in your .zshrc or .bashrc:"
 echo "   source $REPO_DIR/scripts/shell-integration.sh"
 echo ""
 echo "3. Update tmux.conf:"
 echo "   set -g @plugin 'moonstream-labs/tmux-agents'"
 echo "   # Replace status module paths:"
-echo "   #   status_opencode.sh (glyph: ) left of status_claude.sh (glyph: 󰚩)"
+echo "   #   order (left->right): status_opencode.sh, status_codex.sh, status_claude.sh"
 echo ""
 echo "4. Reload tmux config: tmux source-file ~/.config/tmux/tmux.conf"
 echo ""

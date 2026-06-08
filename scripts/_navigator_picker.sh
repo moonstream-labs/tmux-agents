@@ -48,6 +48,8 @@ ROW_FS=$'\x1f'
 GLYPH_CLAUDE="󰚩 "
 GLYPH_OPENCODE=" "
 
+GLYPH_CODEX="✦ "
+
 # --- Layout: fixed budgeted column widths ---
 get_cols() {
   if [[ -n "$RENDER_COLS" && "$RENDER_COLS" =~ ^[0-9]+$ ]]; then
@@ -175,6 +177,7 @@ tool_glyph() {
   case "$1" in
   claude) printf '%s' "$GLYPH_CLAUDE" ;;
   opencode) printf '%s' "$GLYPH_OPENCODE" ;;
+  codex) printf '%s' "$GLYPH_CODEX" ;;
   *) printf '?' ;;
   esac
 }
@@ -523,5 +526,25 @@ elif [[ "$recent_tool" == "opencode" && "$recent_host" == "local" ]]; then
     tmux new-window -c "$recent_dir" "opencode -s '$recent_sid'"
   else
     tmux new-window "opencode -s '$recent_sid'"
+  fi
+
+elif [[ "$recent_tool" == "codex" && "$recent_host" == "local" ]]; then
+  # --- Codex recent: resume session ---
+  recent_cmd="codex resume $(shell_quote "$recent_sid")"
+  if [[ -n "$recent_dir" ]]; then
+    recent_cmd="cd -- $(shell_quote "$recent_dir") && $recent_cmd"
+  fi
+
+  current_path_norm=$(normalize_path "$current_path")
+  recent_path_norm=$(normalize_path "$recent_dir")
+
+  if [[ "$current_cmd" =~ ^(zsh|bash|fish|sh)$ ]] &&
+    [[ -n "$current_path_norm" && -n "$recent_path_norm" ]] &&
+    [[ "$current_path_norm" == "$recent_path_norm" ]]; then
+    tmux send-keys "$recent_cmd" Enter
+  elif [[ -n "$recent_dir" && -d "$recent_dir" ]]; then
+    tmux new-window -c "$recent_dir" "codex resume '$recent_sid'"
+  else
+    tmux new-window "codex resume '$recent_sid'"
   fi
 fi

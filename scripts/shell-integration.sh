@@ -143,3 +143,46 @@ opencode() {
 
   command opencode --port "$port" "$@"
 }
+
+# codex -- Launch Codex with a display name registered with the tmux-agents server
+#
+# Usage:
+#   codex <name> [args...]   Launch with display name "<name>"
+#   codex [args...]          Launch (prompts for a name)
+#   codex resume [args...]   Resume; no name prompt
+#
+# Codex has no native session name, so the name is used only by tmux-agents for
+# the navigator/pill. Codex self-reports its tmux pane via $TMUX_PANE in its
+# lifecycle hooks, so no port/pane wiring is needed here. Approvals are left at
+# their default so the permission pill stays meaningful.
+# Use 'command codex' to bypass this wrapper.
+codex() {
+  local name=""
+  local skip_name=false
+
+  # 'resume'/'exec' subcommands or a flag-first invocation skip the name prompt.
+  case "${1:-}" in
+    resume | exec | -*) skip_name=true ;;
+  esac
+
+  if [[ "$skip_name" == false && $# -gt 0 && "$1" != -* ]]; then
+    name="$1"
+    shift
+  fi
+
+  if [[ -z "$name" && "$skip_name" == false ]]; then
+    printf "Session name: "
+    read -r name
+  fi
+
+  # Pre-register the name with the agent server, keyed by this pane
+  # (fire-and-forget). The SessionStart hook claims it by pane target.
+  if [[ -n "$name" && -n "${TMUX_PANE:-}" ]]; then
+    curl -sf -X POST "$TMUX_AGENTS_SERVER/codex/register" \
+      -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\",\"pane\":\"$TMUX_PANE\"}" \
+      >/dev/null 2>&1 &
+  fi
+
+  command codex "$@"
+}

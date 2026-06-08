@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,12 +18,13 @@ type PaneInfo struct {
 	Target  string // session:window.pane
 	Command string // pane_current_command
 	PID     int    // pane_pid
+	CWD     string // pane_current_path
 }
 
 // ListPanes returns all panes in the tmux server.
 func ListPanes() ([]PaneInfo, error) {
 	out, err := exec.Command("tmux", "list-panes", "-a",
-		"-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_pid}",
+		"-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}",
 	).Output()
 	if err != nil {
 		return nil, err
@@ -33,16 +35,20 @@ func ListPanes() ([]PaneInfo, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 3)
+		parts := strings.SplitN(line, "\t", 4)
 		if len(parts) < 3 {
 			continue
 		}
 		pid, _ := strconv.Atoi(parts[2])
-		panes = append(panes, PaneInfo{
+		p := PaneInfo{
 			Target:  parts[0],
 			Command: parts[1],
 			PID:     pid,
-		})
+		}
+		if len(parts) >= 4 {
+			p.CWD = parts[3]
+		}
+		panes = append(panes, p)
 	}
 	return panes, nil
 }
@@ -51,6 +57,18 @@ func ListPanes() ([]PaneInfo, error) {
 func PaneExists(target string) bool {
 	err := exec.Command("tmux", "display-message", "-p", "-t", target, "#{pane_id}").Run()
 	return err == nil
+}
+
+// ResolvePaneTarget converts a tmux pane id (e.g. "%81" from $TMUX_PANE) into a
+// session:window.pane target. Used to correlate Codex hooks, which self-report
+// their pane via $TMUX_PANE, to a stable pane target.
+func ResolvePaneTarget(paneID string) (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", paneID,
+		"#{session_name}:#{window_index}.#{pane_index}").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // ClaudeSessionFile is the structure of ~/.claude/sessions/<pid>.json.
@@ -139,6 +157,52 @@ func DiscoverOpenCodePort(panePID int) (int, bool) {
 	return 0, false
 }
 
+var codexRolloutRe = regexp.MustCompile(`([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$`)
+
+// CodexSessionIDFromRollout extracts the session (thread) id from a Codex
+// rollout file path (…/rollout-<timestamp>-<uuid>.jsonl). Returns "" otherwise.
+func CodexSessionIDFromRollout(path string) string {
+	if !strings.Contains(path, "rollout-") {
+		return ""
+	}
+	if m := codexRolloutRe.FindStringSubmatch(path); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// FindCodexSessionForPaneTree walks the process tree under panePID, finds the
+// codex process, and returns its session id from the open rollout file
+// descriptor. This gives an exact pane→session mapping independent of cwd
+// (Codex keeps the rollout JSONL open for the session's lifetime). Returns "".
+func FindCodexSessionForPaneTree(panePID int) string {
+	pids := append([]int{panePID}, findChildPIDs(panePID)...)
+	for _, pid := range pids {
+		if sid := codexSessionFromFDs(pid); sid != "" {
+			return sid
+		}
+	}
+	return ""
+}
+
+func codexSessionFromFDs(pid int) string {
+	dir := fmt.Sprintf("/proc/%d/fd", pid)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if sid := CodexSessionIDFromRollout(target); sid != "" {
+			return sid
+		}
+	}
+	return ""
+}
+
 func findChildPIDs(parentPID int) []int {
 	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID)).Output()
 	if err != nil {
@@ -185,6 +249,13 @@ type ScannerCallbacks struct {
 	// OnOpenCodeDiscovered is called when an opencode pane with a known
 	// port is found that is not yet tracked.
 	OnOpenCodeDiscovered func(target string, port int) bool
+
+	// OnCodexDiscovered is called for each codex pane found, with its cwd and
+	// pane pid. Codex hooks fire only on a turn (not on launch/resume/idle) and
+	// never carry the session title, so the server uses this to resolve the
+	// session id from the codex process's open rollout file and refresh the
+	// title from Codex's threads DB.
+	OnCodexDiscovered func(target, cwd string, pid int)
 
 	// IsClaudeTracked returns true if the given pane target is already
 	// tracked as a Claude Code session.
@@ -245,6 +316,16 @@ func scanOnce(cb ScannerCallbacks) {
 			port, found := DiscoverOpenCodePort(p.PID)
 			if found && cb.OnOpenCodeDiscovered != nil {
 				cb.OnOpenCodeDiscovered(p.Target, port)
+			}
+
+		case "codex":
+			// Codex hooks self-report state ($TMUX_PANE), but they fire only on a
+			// turn — not on launch/resume/idle — and never carry the title. So the
+			// scanner discovers each codex pane here (placeholder + title from the
+			// threads DB); hooks refine state. Pruning is handled below.
+			agentPanes[p.Target] = true
+			if cb.OnCodexDiscovered != nil {
+				cb.OnCodexDiscovered(p.Target, p.CWD, p.PID)
 			}
 		}
 	}

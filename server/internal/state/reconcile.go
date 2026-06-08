@@ -54,12 +54,12 @@ func (r *Reconciler) Reconcile() {
 
 	// Compute per-tool pills.
 	pills := make(map[Tool]string)
-	for _, tool := range []Tool{ToolClaude, ToolOpenCode} {
+	for _, tool := range []Tool{ToolClaude, ToolOpenCode, ToolCodex} {
 		pills[tool] = computePill(allPanes, tool)
 	}
 
 	changed := false
-	for _, tool := range []Tool{ToolClaude, ToolOpenCode} {
+	for _, tool := range []Tool{ToolClaude, ToolOpenCode, ToolCodex} {
 		if pills[tool] != r.prevPill[tool] {
 			changed = true
 			break

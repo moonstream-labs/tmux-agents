@@ -6,11 +6,11 @@
 
 1. **`agents.tmux`** — TPM entrypoint. Installs keybinding, ensures server is running, optionally appends status modules.
 
-2. **Go status server** (`server/`) — Background HTTP server on `127.0.0.1:7077`. Receives push events from both tools, maintains state DB, publishes tmux signaling options. Runs as systemd user service.
+2. **Go status server** (`server/`) — Background HTTP server on `127.0.0.1:7077`. Receives push events from all three tools, maintains state DB, publishes tmux signaling options. Runs as systemd user service.
 
 3. **`scripts/_navigator_picker.sh`** — Renders Active/Recent views from state DB. Hosts interactive fzf picker. Routes selection actions per tool.
 
-4. **Status pill scripts** — `status_claude.sh` (glyph: 󰚩) and `status_opencode.sh` (glyph: ). Read per-tool pill options.
+4. **Status pill scripts** — `status_claude.sh` (󰚩), `status_opencode.sh` (), and `status_codex.sh` (✦). Read per-tool pill options.
 
 ## 2. Go Server Architecture
 
@@ -23,6 +23,8 @@ main
  │   POST /claude/register     (pre-registration from claude wrapper)
  │   POST /opencode/register   (instance registration from opencode wrapper)
  │   GET  /opencode/port       (port assignment)
+ │   POST /codex/hook          (Codex hook receiver, via shim)
+ │   POST /codex/register      (pre-registration from codex wrapper)
  │   GET  /healthz
  │
  ├─ claude.WatchTitles         (fsnotify on ~/.claude/projects/*/*.jsonl)
@@ -37,7 +39,7 @@ main
 
 All state mutations from any goroutine call `state.Reconciler.Reconcile()`, which holds a `sync.Mutex` and:
 
-1. Collects `ActivePanes()` from all registered providers (Claude store, OpenCode store)
+1. Collects `ActivePanes()` from all registered providers (Claude, OpenCode, Codex stores)
 2. Collects `RecentSessions()` from all providers
 3. Computes per-tool pill values: `permission|N` > `running|N` > `active|N` > `idle|0`
 4. Compares pills with previous — if changed: writes DB snapshot, bumps `@agents-gen`, sets pill options, refreshes tmux clients
@@ -49,7 +51,7 @@ SQLite at `/tmp/tmux-agents-<uid>/state.db`, WAL mode:
 ```sql
 CREATE TABLE panes (
   target     TEXT PRIMARY KEY,
-  tool       TEXT NOT NULL,      -- 'claude' | 'opencode'
+  tool       TEXT NOT NULL,      -- 'claude' | 'opencode' | 'codex'
   state      TEXT NOT NULL,      -- 'idle' | 'running' | 'permission' | 'unknown'
   session_id TEXT,
   name       TEXT,
@@ -83,6 +85,7 @@ CREATE TABLE session_names (   -- persistent name cache; survives restarts
 
 - `@agents-claude-pill` — format: `state|count`
 - `@agents-opencode-pill` — format: `state|count`
+- `@agents-codex-pill` — format: `state|count`
 - `@agents-gen` — monotonic counter, incremented on any state change
 - `@agents-server-ts` — unix epoch heartbeat
 
@@ -153,29 +156,99 @@ Connection loss triggers exponential backoff retry (1s → 30s max).
 - `GET /session/status` — per-session status (idle, busy, retry)
 - `PATCH /session/:id` — rename (propagated via `session.updated` SSE event)
 
-## 5. Pane Scanner Fallback
+## 5. Codex Integration
+
+### State via command hooks
+
+Codex lifecycle hooks (in `~/.codex/hooks.json` or `~/.codex/config.toml`, enabled
+by default) are **command** hooks — Codex has no HTTP hook type — so each event
+runs `scripts/codex-hook.sh`, which forwards the event JSON (received on stdin) to
+`POST /codex/hook` and adds the pane id via an `X-Tmux-Pane` header. The shim
+detaches the curl and returns immediately because Codex runs hooks synchronously,
+and emits no stdout (Codex warns on non-JSON hook output). The payload schema
+mirrors Claude Code's (`session_id`, `cwd`, `hook_event_name`, `transcript_path`, …).
+
+| Hook Event | State Transition |
+|---|---|
+| `SessionStart` | Register → idle |
+| `UserPromptSubmit` | → running |
+| `PreToolUse` | → running |
+| `PostToolUse` | → running |
+| `PermissionRequest` | → permission |
+| `Stop` | → idle |
+| `PreCompact` / `PostCompact` / `SubagentStart` / `SubagentStop` | tracked, no state change |
+
+Two Codex limitations shape the rest of the design: hooks fire **only on a turn**
+(not on launch, resume, or while idle), and there is no `SessionEnd`. So hooks alone
+can't see an idle or just-resumed session, and a finished session is removed by the
+pane scanner when its pane disappears.
+
+### Discovery, titles & correlation
+
+Codex's on-disk session index is the `threads` table in `~/.codex/state_<N>.sqlite`
+(the store behind `codex resume`): `id` (= the session id and the uuid embedded in
+the rollout filename), `title`, `cwd`, `updated_at`. `codex.ThreadReader` reads it
+**read-only and best-effort** — globbing the highest schema version, tolerating a
+missing/changed DB, and degrading to "no title" rather than erroring (the schema is
+undocumented and version-numbered).
+
+Two sources combine, mirroring Claude's *(session file + hooks)*:
+
+- **Pane scanner (every 5s)** finds each `codex` pane by `pane_current_command`,
+  walks the pane's process tree to the `codex` process, and reads its **open rollout
+  file descriptor** (`/proc/<pid>/fd/* → …/rollout-<ts>-<uuid>.jsonl`). The uuid is
+  the exact session id, so the scanner registers the (idle) session and titles it via
+  `ThreadReader.ByID(id)` — no cwd guessing. This makes a launched- or
+  resumed-but-idle session visible and correctly named before its first turn, and
+  rebinds the pane if a different session is resumed into it. (cwd matching was
+  dropped because sessions sharing a directory would borrow each other's titles.) If
+  the rollout fd can't be read, the scanner falls back to a bare, unnamed placeholder
+  rather than risk a wrong title.
+- **Hooks** self-report the pane via `$TMUX_PANE` (resolved to a target with
+  `tmux display-message`) and drive state transitions; the handler upserts on every
+  event, self-healing after a server restart.
+
+`ActivePanes()` dedupes by pane target (a hook binding retires any placeholder for
+that pane). Title/rename changes propagate within one scan (~5s).
+
+- The display name is Codex's live session title from `threads.title` (the value
+  `codex resume` shows), refreshed each scan by exact session id — so auto-titles and
+  renames are reflected. A `codex` wrapper name is the initial label until Codex sets a
+  title (the scanner only overwrites with a non-empty title). The pill therefore always
+  matches what Codex itself shows for the session, including after a resume.
+- Recent resume uses `codex resume <session_id>`.
+
+### Trust
+
+Non-managed Codex command hooks must be reviewed once via `/hooks` (or bypassed per
+invocation with `--dangerously-bypass-hook-trust`); trust is keyed to the hook's
+hash, so editing the shim command requires re-trusting.
+
+## 6. Pane Scanner Fallback
 
 Background goroutine (5s interval) runs `tmux list-panes -a`. For each pane:
 
 - Running `claude`: walks `/proc` tree to find `~/.claude/sessions/<pid>.json`, assigns pane target to existing session or registers new one
 - Running `opencode`: discovers `--port` flag from `/proc/<pid>/cmdline`, registers SSE connection
+- Running `codex`: resolves the exact session id from the codex process's open rollout fd, registers the (idle) session, and titles it from the threads DB by id; state comes from hooks; the session is pruned when the pane disappears (Codex has no `SessionEnd`)
 
 Handles sessions started without wrappers and server restarts while sessions are active.
 
-## 6. Picker Rendering
+## 7. Picker Rendering
 
-`_navigator_picker.sh` reads from state DB. Rows include a tool glyph column (󰚩 / ) between the state dot and session name.
+`_navigator_picker.sh` reads from state DB. Rows include a tool glyph column (󰚩 /  / ✦) between the state dot and session name.
 
 View switching via fzf `--listen` + background watcher polling `@agents-gen`.
 
 Selection routing by tool:
-- Active: navigate to tmux pane (both tools)
+- Active: navigate to tmux pane (all tools)
 - Recent Claude: `claude -r <session_id>`
 - Recent OpenCode: `opencode -s <session_id>` in session directory
+- Recent Codex: `codex resume <session_id>` in session directory
 
 > **Current status:** Both stores' `RecentSessions()` return `nil`, and `Reconcile()` rewrites the `recent` table from those providers on every pass — so the Recent tab and its selection routing are wired, but the list is not yet populated. Populating it is planned work: an in-memory recent ring per store surfaced via `RecentSessions()`, since side-channel writes directly to the `recent` table would be truncated by the next reconcile.
 
-## 7. Process Lifecycle
+## 8. Process Lifecycle
 
 Server runs as `tmux-agents.service` (systemd user unit, `Type=exec`, `Restart=on-failure`).
 

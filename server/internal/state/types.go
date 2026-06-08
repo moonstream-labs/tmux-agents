@@ -5,6 +5,7 @@ type Tool string
 const (
 	ToolClaude   Tool = "claude"
 	ToolOpenCode Tool = "opencode"
+	ToolCodex    Tool = "codex"
 )
 
 type SessionState string
