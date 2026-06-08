@@ -198,7 +198,7 @@ load_recent_rows() {
 
   [[ -f "$db_path" ]] || return 0
   sqlite3 -separator "$ROW_FS" "$db_path" \
-    "SELECT tool, host, session_id, replace(replace(replace(IFNULL(name,''), char(9), ' '), char(10), ' '), char(13), ''), replace(replace(replace(IFNULL(dir,''), char(9), ' '), char(10), ' '), char(13), ''), IFNULL(updated, ''), IFNULL(tmux_session, '') FROM recent ORDER BY updated DESC LIMIT 20" \
+    "SELECT tool, host, session_id, replace(replace(replace(IFNULL(name,''), char(9), ' '), char(10), ' '), char(13), ''), replace(replace(replace(IFNULL(dir,''), char(9), ' '), char(10), ' '), char(13), ''), IFNULL(updated, ''), IFNULL(tmux_session, '') FROM recent WHERE NOT EXISTS (SELECT 1 FROM panes p WHERE p.tool = recent.tool AND p.session_id = recent.session_id) ORDER BY updated DESC LIMIT 20" \
     2>/dev/null || true
 }
 
@@ -212,6 +212,19 @@ lookup_recent_dir() {
   [[ -f "$db_path" ]] || return 0
 
   sqlite3 "$db_path" "SELECT IFNULL(dir, '') FROM recent WHERE tool = '${tool//\'/\'\'}' AND host = '${host//\'/\'\'}' AND session_id = '${sid//\'/\'\'}' LIMIT 1" 2>/dev/null || true
+}
+
+# Returns the active pane target (session:window.pane) for a session, if it is
+# currently open, else empty.
+lookup_active_target() {
+  local tool="$1"
+  local sid="$2"
+
+  local db_path
+  db_path=$(get_state_db_path)
+  [[ -f "$db_path" ]] || return 0
+
+  sqlite3 "$db_path" "SELECT target FROM panes WHERE tool = '${tool//\'/\'\'}' AND session_id = '${sid//\'/\'\'}' LIMIT 1" 2>/dev/null || true
 }
 
 normalize_path() {
@@ -485,6 +498,20 @@ recent_host=$(b64dec "$host_b64")
 recent_sid=$(b64dec "$sid_b64")
 recent_tmux_session=$(b64dec "$tmux_b64")
 [[ -n "$recent_host" && -n "$recent_sid" ]] || exit 0
+
+# If this session is already open as an active pane, navigate to it rather than
+# launching a second instance on the same backing session.
+if [[ "$recent_host" == "local" ]]; then
+  active_target=$(lookup_active_target "$recent_tool" "$recent_sid")
+  if [[ -n "$active_target" ]]; then
+    nav_session="${active_target%%:*}"
+    nav_window_pane="${active_target#*:}"
+    tmux select-window -t "${nav_session}:${nav_window_pane%%.*}" 2>/dev/null || true
+    tmux select-pane -t "$active_target" 2>/dev/null || true
+    tmux switch-client -t "$nav_session" 2>/dev/null || true
+    exit 0
+  fi
+fi
 
 current_cmd=$(tmux display-message -p '#{pane_current_command}' 2>/dev/null || true)
 current_path=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null || true)
