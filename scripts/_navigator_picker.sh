@@ -243,6 +243,21 @@ short_dir() {
   truncate_str "$parts" "$C_DIR"
 }
 
+# display_label -- the name shown in the session column. A session that ended
+# (or is running) without ever being named has an empty name; fall back to the
+# directory basename, then "untitled", so it is never a blank row. Used by both
+# the Active and Recent renderers so the two views stay consistent.
+display_label() {
+  local name="$1" dir="$2"
+  if [[ -n "$name" ]]; then
+    printf '%s' "$name"
+  elif [[ -n "$dir" && "$dir" != "-" ]]; then
+    basename -- "$dir"
+  else
+    printf '%s' "untitled"
+  fi
+}
+
 pad_line() {
   local line="$1"
   local visible
@@ -303,7 +318,7 @@ render_active() {
 
     # Format fields
     local s_title s_dir s_host age tmux_ses
-    s_title=$(truncate_str "${title:-untitled}" "$C_SESSION")
+    s_title=$(truncate_str "$(display_label "$title" "$dir")" "$C_SESSION")
     if [[ "$dir" == "-" || -z "$dir" ]]; then
       s_dir=$(truncate_str "${dir:--}" "$C_DIR")
     else
@@ -363,7 +378,7 @@ render_recent() {
     glyph=$(tool_glyph "$tool")
 
     local s_title s_dir s_host age tmux_ses
-    s_title=$(truncate_str "$title" "$C_SESSION")
+    s_title=$(truncate_str "$(display_label "$title" "$dir")" "$C_SESSION")
     s_dir=$(short_dir "$dir")
     s_host=$(truncate_str "$host" "$C_HOST")
     tmux_ses="-"
