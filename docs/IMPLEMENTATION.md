@@ -259,3 +259,27 @@ Server runs as `tmux-agents.service` (systemd user unit, `Type=exec`, `Restart=o
 `agents.tmux` checks `GET /healthz` on plugin load. If unreachable, starts the service via `systemctl --user start`.
 
 Graceful shutdown on SIGTERM: stops HTTP listener, cancels all SSE goroutines, writes final state, closes DB.
+
+## 9. Last-Window Toggle
+
+A small convenience that is **independent of the Go server** — pure tmux hooks +
+shell (`scripts/last-window.sh`), so it works even when the status server is down.
+It tracks the previously-focused window *across sessions* (tmux's built-in
+`last-window` is per-session only).
+
+- **`track`** — invoked by the `session-window-changed` and `client-session-changed`
+  hooks. Records the current and previous focus as `session:window.pane` in two
+  global options, `@agents-lastwin-cur` / `@agents-lastwin-prev`. Redundant
+  same-window fires are ignored so `prev` is never clobbered with `cur`.
+- **`jump`** — bound to `@agents-last-window-key` (opt-in; unset = no binding).
+  Switches to `@agents-lastwin-prev` via `select-window` → `select-pane` →
+  `switch-client` (mirroring the picker's navigation), guarded so a since-closed
+  target is a silent no-op. Because the jump itself fires the tracking hooks, the
+  binding ping-pongs between the two most recent windows.
+
+`agents.tmux` registers the hooks once per server, guarded by the
+`@agents-lastwin-hooked` sentinel option: this file is re-sourced on every
+tmux/TPM reload, so the guard prevents duplicate appended hooks; it clears on
+server restart, exactly when the hooks themselves reset. Hooks are appended with
+`set-hook -ga`, so the tracker coexists with any future consumer of those hooks.
+The feature touches none of the server, DB, reconciler, pills, or picker.

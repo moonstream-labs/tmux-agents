@@ -136,6 +136,21 @@ Active rows show a tool glyph (󰚩, , or ✦), state indicator, session name, d
 
 Recent rows show ended sessions from all tools (newest first) with their directory and age. Selecting one resumes it — Claude Code `claude -r <session_id>`, OpenCode `opencode -s <session_id>`, Codex `codex resume <session_id>` — reusing the current pane if it's a shell in the same directory, otherwise opening a new window.
 
+### Last-window toggle
+
+`@agents-last-window-key` binds a "jump to the previously-focused window" toggle
+that works **across sessions** — unlike tmux's built-in `last-window`, which only
+remembers the last window *within* the current session. Opt-in (unset by default);
+set it to a key to enable:
+
+```tmux
+set -g @agents-last-window-key 'a'   # prefix + a toggles to the last window, anywhere
+```
+
+It tracks focus via tmux hooks and ping-pongs between your two most recent windows
+regardless of which session each lives in. Independent of the status server — no
+server, DB, or pill involvement.
+
 ### Session naming
 
 - At launch (optional): `claude my-name`, `opencode my-name`, or `codex my-name`
@@ -152,6 +167,7 @@ Set options before TPM initialization.
 
 ```tmux
 set -g @agents-popup-key 'o'
+set -g @agents-last-window-key 'a'   # toggle to last-focused window across sessions (default: unset)
 set -g @agents-popup-width '70%'
 set -g @agents-popup-height '50%'
 set -g @agents-popup-border 'rounded'
@@ -163,6 +179,7 @@ set -g @agents-auto-status-right 'off'
 | Option | Default | Description |
 |---|---|---|
 | `@agents-popup-key` | `o` | Popup launcher key (with prefix) |
+| `@agents-last-window-key` | _(unset)_ | Toggle to the previously-focused window across sessions (with prefix); empty = no binding |
 | `@agents-popup-width` | `70%` | Popup width |
 | `@agents-popup-height` | `50%` | Popup height |
 | `@agents-popup-border` | `rounded` | Popup border style |

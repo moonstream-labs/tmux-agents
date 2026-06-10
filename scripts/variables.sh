@@ -9,6 +9,10 @@ _AGENTS_VARIABLES_LOADED=1
 AGENTS_POPUP_KEY_OPTION="@agents-popup-key"
 AGENTS_POPUP_KEY_DEFAULT="o"
 
+# --- Last-window toggle key (opt-in: empty = no binding) ---
+AGENTS_LAST_WINDOW_KEY_OPTION="@agents-last-window-key"
+AGENTS_LAST_WINDOW_KEY_DEFAULT=""
+
 # --- Popup styling ---
 AGENTS_POPUP_WIDTH_OPTION="@agents-popup-width"
 AGENTS_POPUP_WIDTH_DEFAULT="70%"

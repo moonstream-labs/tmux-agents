@@ -29,6 +29,22 @@ fi
 POPUP_KEY=$(get_tmux_option "$AGENTS_POPUP_KEY_OPTION" "$AGENTS_POPUP_KEY_DEFAULT")
 tmux bind-key "$POPUP_KEY" run-shell -b "$SCRIPTS_DIR/navigator.sh"
 
+# --- Last-window toggle (opt-in; hook-driven, independent of the server) ---
+# Binds a "jump to the previously-focused window across sessions" toggle and
+# registers the focus-tracking hooks. The bind is idempotent (overwrite); the
+# hooks are appended (-ga) once per server, guarded by a sentinel option so a
+# config reload (which re-sources this file) cannot stack duplicate hooks. The
+# sentinel clears on server restart, exactly when the hooks themselves reset.
+LAST_WINDOW_KEY=$(get_tmux_option "$AGENTS_LAST_WINDOW_KEY_OPTION" "$AGENTS_LAST_WINDOW_KEY_DEFAULT")
+if [[ -n "$LAST_WINDOW_KEY" ]]; then
+    tmux bind-key "$LAST_WINDOW_KEY" run-shell -b "$SCRIPTS_DIR/last-window.sh jump"
+    if [[ "$(tmux show-option -gqv @agents-lastwin-hooked)" != "1" ]]; then
+        tmux set-hook -ga session-window-changed "run-shell -b '$SCRIPTS_DIR/last-window.sh track'"
+        tmux set-hook -ga client-session-changed "run-shell -b '$SCRIPTS_DIR/last-window.sh track'"
+        tmux set-option -g @agents-lastwin-hooked 1
+    fi
+fi
+
 # --- Ensure Go server is running ---
 ensure_server_running || true
 
