@@ -241,10 +241,16 @@ Handles sessions started without wrappers and server restarts while sessions are
 View switching via fzf `--listen` + background watcher polling `@agents-gen`.
 
 Selection routing by tool:
-- Active: navigate to tmux pane (all tools)
-- Recent Claude: `claude -r <session_id>`
-- Recent OpenCode: `opencode -s <session_id>` in session directory
-- Recent Codex: `codex resume <session_id>` in session directory
+- Active: navigate to the tmux pane (all tools)
+- Recent Claude: `claude -r <session_id> --dangerously-skip-permissions`
+- Recent OpenCode: `opencode --port <N> -s <session_id>` (explicit `--port` so the pane scanner can discover the resumed instance; `<N>` from `GET /opencode/port`, random fallback)
+- Recent Codex: `codex resume <session_id>`
+
+All recent selections open a **new window**, always — there is no in-place/send-keys mode. The window is created in the invoking session (`new-window -t <SRC_SESSION>:`) and in the recent session's recorded directory, falling back to the invoking pane's cwd, then tmux's default (`resume_dir`/`open_resume_window`).
+
+#### Invoking-context capture
+
+The popup is launched with the triggering client: the keybinding passes `#{client_name}` (expanded by `run-shell`) to `navigator.sh`, which derives the session and cwd *from that client* and forwards `AGENTS_SRC_CLIENT` / `AGENTS_SRC_SESSION` / `AGENTS_SRC_PATH` into the picker via `display-popup -e`. The picker then `-t`/`-c`-targets every `new-window`, `switch-client`, etc. on that captured context instead of tmux's ambiguous "current" client — so resume and navigation land on the right terminal even with several clients attached. Capture happens before `ensure_server_running` so a cold-start delay can't let focus drift.
 
 ### Recent sessions
 
