@@ -16,10 +16,13 @@ source "$CURRENT_DIR/helpers.sh"
 SRC_CLIENT="${1:-}"
 [[ -z "$SRC_CLIENT" ]] && SRC_CLIENT=$(tmux display-message -p '#{client_name}' 2>/dev/null)
 
-src_q=()
-[[ -n "$SRC_CLIENT" ]] && src_q=(-c "$SRC_CLIENT")
-SRC_SESSION=$(tmux display-message "${src_q[@]}" -p '#{session_name}' 2>/dev/null)
-SRC_PATH=$(tmux display-message "${src_q[@]}" -p '#{pane_current_path}' 2>/dev/null)
+# -c flag for the captured client, used for every client-scoped tmux command
+# below (including display-popup itself). Omitted when the client is unknown so
+# commands degrade to tmux's default resolution.
+client_flag=()
+[[ -n "$SRC_CLIENT" ]] && client_flag=(-c "$SRC_CLIENT")
+SRC_SESSION=$(tmux display-message "${client_flag[@]}" -p '#{session_name}' 2>/dev/null)
+SRC_PATH=$(tmux display-message "${client_flag[@]}" -p '#{pane_current_path}' 2>/dev/null)
 
 ensure_server_running
 
@@ -30,9 +33,11 @@ POPUP_BORDER=$(get_tmux_option "$AGENTS_POPUP_BORDER_OPTION" "$AGENTS_POPUP_BORD
 POPUP_BG=$(get_tmux_option "$AGENTS_POPUP_BG_OPTION" "$AGENTS_POPUP_BG_DEFAULT")
 POPUP_FG=$(get_tmux_option "$AGENTS_POPUP_FG_OPTION" "$AGENTS_POPUP_FG_DEFAULT")
 
-# Forward the invoking context to the picker as environment variables (no
+# Display the popup on the captured client (not tmux's implicit current client,
+# which can differ after focus drift or with multiple clients attached) and
+# forward the invoking context to the picker as environment variables (no
 # command-string quoting of session names / paths required).
-tmux display-popup -E \
+tmux display-popup -E "${client_flag[@]}" \
     -w "$POPUP_WIDTH" \
     -h "$POPUP_HEIGHT" \
     -b "$POPUP_BORDER" \
