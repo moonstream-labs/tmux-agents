@@ -520,7 +520,7 @@ recent_dir=$(lookup_recent_dir "$recent_tool" "$recent_host" "$recent_sid")
 
 if [[ "$recent_tool" == "claude" && "$recent_host" == "local" ]]; then
   # --- Claude Code recent: resume session ---
-  resume_cmd="claude -r $(shell_quote "$recent_sid") --dangerously-skip-permissions --effort max"
+  resume_cmd="claude -r $(shell_quote "$recent_sid") --dangerously-skip-permissions"
 
   current_path_norm=$(normalize_path "$current_path")
   recent_path_norm=$(normalize_path "$recent_dir")

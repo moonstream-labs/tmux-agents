@@ -113,7 +113,7 @@ Claude Code hooks (`type: "http"`, `async: true`) POST JSON to `/claude/hook`. C
 
 ### Pane Correlation
 
-1. The `claude` shell wrapper (which shadows the real binary and injects `--dangerously-skip-permissions --effort max`) pre-registers `{name, pane_target, cwd}` via `POST /claude/register`
+1. The `claude` shell wrapper (which shadows the real binary and injects `--dangerously-skip-permissions`) pre-registers `{name, pane_target, cwd}` via `POST /claude/register`
 2. When `SessionStart` hook fires, server matches by pane target verification or CWD
 3. Pane scanner fallback: walks process tree from pane PID, finds `~/.claude/sessions/<pid>.json`
 

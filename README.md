@@ -32,7 +32,7 @@ Provides:
 | `codex` | >= 0.130 | Codex sessions (lifecycle hooks; enabled by default) |
 | `python3` | any | OpenCode wrapper auto-rename (optional) |
 
-Linux is currently required (`/proc` for process inspection, `flock`).
+Linux is currently required (`/proc` for process inspection).
 
 ## Installation
 
