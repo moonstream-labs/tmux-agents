@@ -44,6 +44,15 @@ FG_TEXT=$(ansi_fg "$CLR_TEXT")
 RST="\033[0m"
 ROW_FS=$'\x1f'
 
+# Invoking context, forwarded by navigator.sh via `display-popup -e`, so the
+# picker acts on the exact client/session/cwd the popup was launched from rather
+# than tmux's ambiguous "current" target (which misroutes with multiple clients
+# attached). Empty when launched outside the normal keybinding path; each use
+# degrades gracefully to tmux's default resolution.
+SRC_CLIENT="${AGENTS_SRC_CLIENT:-}"
+SRC_SESSION="${AGENTS_SRC_SESSION:-}"
+SRC_PATH="${AGENTS_SRC_PATH:-}"
+
 # Tool glyphs
 GLYPH_CLAUDE="󰚩 "
 GLYPH_OPENCODE=" "
@@ -227,12 +236,41 @@ lookup_active_target() {
   sqlite3 "$db_path" "SELECT target FROM panes WHERE tool = '${tool//\'/\'\'}' AND session_id = '${sid//\'/\'\'}' LIMIT 1" 2>/dev/null || true
 }
 
-normalize_path() {
-  local p="${1:-}"
-  [[ -z "$p" ]] && return
-  p="${p%/}"
-  [[ -z "$p" ]] && p="/"
-  readlink -f -- "$p" 2>/dev/null || printf '%s' "$p"
+# navigate_to_pane <target> -- focus an existing pane (session:window.pane),
+# switching the *invoking* client (SRC_CLIENT) to it so the right terminal moves.
+navigate_to_pane() {
+  local target="$1"
+  local sess="${target%%:*}"
+  local win_pane="${target#*:}"
+  local cflag=()
+  [[ -n "$SRC_CLIENT" ]] && cflag=(-c "$SRC_CLIENT")
+  tmux select-window -t "${sess}:${win_pane%%.*}" 2>/dev/null || true
+  tmux select-pane -t "$target" 2>/dev/null || true
+  tmux switch-client "${cflag[@]}" -t "$sess" 2>/dev/null || true
+}
+
+# resume_dir <recorded_dir> -- where a resumed session should open: the recorded
+# session dir if it still exists, else the invoking pane's cwd, else empty (let
+# tmux choose). Keeps resumes in the right project directory deterministically.
+resume_dir() {
+  local recorded="$1"
+  if [[ -n "$recorded" && -d "$recorded" ]]; then
+    printf '%s' "$recorded"
+  elif [[ -n "$SRC_PATH" && -d "$SRC_PATH" ]]; then
+    printf '%s' "$SRC_PATH"
+  fi
+}
+
+# open_resume_window <cmd> <dir> -- run <cmd> in a new window in the *invoking*
+# session (SRC_SESSION), in <dir>. Targeting the captured session rather than
+# tmux's "current" one is what makes resume land in the right place with multiple
+# clients attached.
+open_resume_window() {
+  local cmd="$1" dir="$2"
+  local tflag=() cflag=()
+  [[ -n "$SRC_SESSION" ]] && tflag=(-t "${SRC_SESSION}:")
+  [[ -n "$dir" ]] && cflag=(-c "$dir")
+  tmux new-window "${tflag[@]}" "${cflag[@]}" "$cmd"
 }
 
 short_dir() {
@@ -497,12 +535,7 @@ key=$(cut -f1 <<<"$selection")
 
 # --- Active session: navigate to tmux pane ---
 if [[ "$key" != recent\|* ]]; then
-  local_target="$key"
-  tmux_session="${local_target%%:*}"
-  window_pane="${local_target#*:}"
-  tmux select-window -t "${tmux_session}:${window_pane%%.*}" 2>/dev/null || true
-  tmux select-pane -t "$local_target" 2>/dev/null || true
-  tmux switch-client -t "$tmux_session" 2>/dev/null || true
+  navigate_to_pane "$key"
   exit 0
 fi
 
@@ -519,74 +552,34 @@ recent_tmux_session=$(b64dec "$tmux_b64")
 if [[ "$recent_host" == "local" ]]; then
   active_target=$(lookup_active_target "$recent_tool" "$recent_sid")
   if [[ -n "$active_target" ]]; then
-    nav_session="${active_target%%:*}"
-    nav_window_pane="${active_target#*:}"
-    tmux select-window -t "${nav_session}:${nav_window_pane%%.*}" 2>/dev/null || true
-    tmux select-pane -t "$active_target" 2>/dev/null || true
-    tmux switch-client -t "$nav_session" 2>/dev/null || true
+    navigate_to_pane "$active_target"
     exit 0
   fi
 fi
 
-current_cmd=$(tmux display-message -p '#{pane_current_command}' 2>/dev/null || true)
-current_path=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null || true)
-
 recent_dir=$(lookup_recent_dir "$recent_tool" "$recent_host" "$recent_sid")
+dir=$(resume_dir "$recent_dir")
 
-if [[ "$recent_tool" == "claude" && "$recent_host" == "local" ]]; then
-  # --- Claude Code recent: resume session ---
-  resume_cmd="claude -r $(shell_quote "$recent_sid") --dangerously-skip-permissions"
+[[ "$recent_host" == "local" ]] || exit 0
 
-  current_path_norm=$(normalize_path "$current_path")
-  recent_path_norm=$(normalize_path "$recent_dir")
-
-  if [[ "$current_cmd" =~ ^(zsh|bash|fish|sh)$ ]] &&
-    [[ -n "$current_path_norm" && -n "$recent_path_norm" ]] &&
-    [[ "$current_path_norm" == "$recent_path_norm" ]]; then
-    tmux send-keys "$resume_cmd" Enter
-  elif [[ -n "$recent_dir" && -d "$recent_dir" ]]; then
-    tmux new-window -c "$recent_dir" "$resume_cmd"
-  else
-    tmux new-window "$resume_cmd"
-  fi
-
-elif [[ "$recent_tool" == "opencode" && "$recent_host" == "local" ]]; then
-  # --- OpenCode recent: resume session ---
-  recent_cmd="opencode -s $(shell_quote "$recent_sid")"
-  if [[ -n "$recent_dir" ]]; then
-    recent_cmd="cd -- $(shell_quote "$recent_dir") && $recent_cmd"
-  fi
-
-  current_path_norm=$(normalize_path "$current_path")
-  recent_path_norm=$(normalize_path "$recent_dir")
-
-  if [[ "$current_cmd" =~ ^(zsh|bash|fish|sh)$ ]] &&
-    [[ -n "$current_path_norm" && -n "$recent_path_norm" ]] &&
-    [[ "$current_path_norm" == "$recent_path_norm" ]]; then
-    tmux send-keys "$recent_cmd" Enter
-  elif [[ -n "$recent_dir" && -d "$recent_dir" ]]; then
-    tmux new-window -c "$recent_dir" "opencode -s '$recent_sid'"
-  else
-    tmux new-window "opencode -s '$recent_sid'"
-  fi
-
-elif [[ "$recent_tool" == "codex" && "$recent_host" == "local" ]]; then
-  # --- Codex recent: resume session ---
-  recent_cmd="codex resume $(shell_quote "$recent_sid")"
-  if [[ -n "$recent_dir" ]]; then
-    recent_cmd="cd -- $(shell_quote "$recent_dir") && $recent_cmd"
-  fi
-
-  current_path_norm=$(normalize_path "$current_path")
-  recent_path_norm=$(normalize_path "$recent_dir")
-
-  if [[ "$current_cmd" =~ ^(zsh|bash|fish|sh)$ ]] &&
-    [[ -n "$current_path_norm" && -n "$recent_path_norm" ]] &&
-    [[ "$current_path_norm" == "$recent_path_norm" ]]; then
-    tmux send-keys "$recent_cmd" Enter
-  elif [[ -n "$recent_dir" && -d "$recent_dir" ]]; then
-    tmux new-window -c "$recent_dir" "codex resume '$recent_sid'"
-  else
-    tmux new-window "codex resume '$recent_sid'"
-  fi
-fi
+# Resume always opens a new window in the invoking session, in the session's
+# directory (see resume_dir / open_resume_window). The raw binary is launched
+# non-interactively; discovery is via hooks + the pane scanner.
+case "$recent_tool" in
+claude)
+  open_resume_window \
+    "claude -r $(shell_quote "$recent_sid") --dangerously-skip-permissions" "$dir"
+  ;;
+opencode)
+  # The raw binary skips the opencode wrapper's port assignment, but the scanner
+  # discovers OpenCode only via the --port flag in /proc — so pass an explicit
+  # port (from the server, random fallback) or the resumed instance is untracked.
+  port=$(curl -sf "$AGENTS_SERVER_URL/opencode/port" 2>/dev/null)
+  [[ "$port" =~ ^[0-9]+$ ]] || port=$(( 10000 + (RANDOM % 55000) ))
+  open_resume_window \
+    "opencode --port $port -s $(shell_quote "$recent_sid")" "$dir"
+  ;;
+codex)
+  open_resume_window "codex resume $(shell_quote "$recent_sid")" "$dir"
+  ;;
+esac

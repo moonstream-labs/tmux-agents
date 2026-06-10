@@ -134,7 +134,7 @@ discovered by the pane scanner within ~5 seconds.
 
 Active rows show a tool glyph (󰚩, , or ✦), state indicator, session name, directory, and tmux session. Selecting navigates to the pane.
 
-Recent rows show ended sessions from all tools (newest first) with their directory and age. Selecting one resumes it — Claude Code `claude -r <session_id>`, OpenCode `opencode -s <session_id>`, Codex `codex resume <session_id>` — reusing the current pane if it's a shell in the same directory, otherwise opening a new window.
+Recent rows show ended sessions from all tools (newest first) with their directory and age. Selecting one resumes it — Claude Code `claude -r <session_id>`, OpenCode `opencode -s <session_id>`, Codex `codex resume <session_id>` — in a **new window**, created in the tmux session you launched the picker from and opened in the session's recorded directory (falling back to your current directory if that path is gone). Navigation and resume target the client/session the popup was opened from, so they stay correct with multiple clients attached.
 
 ### Last-window toggle
 

@@ -26,8 +26,12 @@ if [[ -f "$OLD_STATE_DIR/daemon.pid" ]]; then
 fi
 
 # --- Keybinding ---
+# Pass the triggering client to the launcher. run-shell expands #{...} formats in
+# its command, so the picker can act on the exact client/session the popup was
+# opened from instead of tmux's ambiguous "current" client (which misroutes when
+# multiple clients are attached). client_name is a pty path with no spaces.
 POPUP_KEY=$(get_tmux_option "$AGENTS_POPUP_KEY_OPTION" "$AGENTS_POPUP_KEY_DEFAULT")
-tmux bind-key "$POPUP_KEY" run-shell -b "$SCRIPTS_DIR/navigator.sh"
+tmux bind-key "$POPUP_KEY" run-shell -b "$SCRIPTS_DIR/navigator.sh '#{client_name}'"
 
 # --- Last-window toggle (opt-in; hook-driven, independent of the server) ---
 # Binds a "jump to the previously-focused window across sessions" toggle and
