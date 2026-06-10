@@ -236,17 +236,16 @@ lookup_active_target() {
   sqlite3 "$db_path" "SELECT target FROM panes WHERE tool = '${tool//\'/\'\'}' AND session_id = '${sid//\'/\'\'}' LIMIT 1" 2>/dev/null || true
 }
 
-# navigate_to_pane <target> -- focus an existing pane (session:window.pane),
-# switching the *invoking* client (SRC_CLIENT) to it so the right terminal moves.
+# navigate_to_pane <target> -- switch the *invoking* client (SRC_CLIENT) to an
+# existing pane (session:window.pane). switch-client -t accepts a pane target (a
+# target containing ':', '.' or '%') as a special case and changes session,
+# window, and pane in one step -- so only the invoking client moves, with no
+# preparatory global window/pane selection in the destination session.
 navigate_to_pane() {
   local target="$1"
-  local sess="${target%%:*}"
-  local win_pane="${target#*:}"
   local cflag=()
   [[ -n "$SRC_CLIENT" ]] && cflag=(-c "$SRC_CLIENT")
-  tmux select-window -t "${sess}:${win_pane%%.*}" 2>/dev/null || true
-  tmux select-pane -t "$target" 2>/dev/null || true
-  tmux switch-client "${cflag[@]}" -t "$sess" 2>/dev/null || true
+  tmux switch-client "${cflag[@]}" -t "$target" 2>/dev/null || true
 }
 
 # resume_dir <recorded_dir> -- where a resumed session should open: the recorded
