@@ -151,6 +151,29 @@ It tracks focus via tmux hooks and ping-pongs between your two most recent windo
 regardless of which session each lives in. Independent of the status server — no
 server, DB, or pill involvement.
 
+### Session navigation
+
+`@agents-nav-prev-key` / `@agents-nav-next-key` bind keys that step **backward /
+forward through the active agent sessions** — the same set the Active view shows —
+jumping focus straight to each session's pane, no popup. Opt-in (unset by default):
+
+```tmux
+set -g @agents-nav-prev-key 'C-S-,'   # previous active session
+set -g @agents-nav-next-key 'C-S-.'   # next active session
+```
+
+The ring is **stable**: sessions are ordered by tmux pane id (`%N`), so each keeps
+its slot until its pane dies — independent of the Active view's priority/recency
+display order. Navigation wraps at both ends, and when you're focused on a
+non-agent pane it resumes from the last session you visited.
+
+By default the keys bind in the **root** table (no prefix), firing before the
+focused pane sees them — needed when the terminal emits a dedicated no-prefix key
+for them. Set `@agents-nav-key-table` to `prefix` to bind under the prefix instead
+(`prefix` + key), which never reaches the pane. Set `@agents-nav-indicator 'on'` to
+flash `name (i/n)` on each step (off by default — the focus change is usually
+feedback enough; `(i/n)` is the part the `%N` order doesn't otherwise surface).
+
 ### Session naming
 
 - At launch (optional): `claude my-name`, `opencode my-name`, or `codex my-name`
@@ -168,6 +191,8 @@ Set options before TPM initialization.
 ```tmux
 set -g @agents-popup-key 'o'
 set -g @agents-last-window-key 'a'   # toggle to last-focused window across sessions (default: unset)
+set -g @agents-nav-prev-key 'C-S-,' # step to previous active session (default: unset)
+set -g @agents-nav-next-key 'C-S-.' # step to next active session (default: unset)
 set -g @agents-popup-width '70%'
 set -g @agents-popup-height '50%'
 set -g @agents-popup-border 'rounded'
@@ -180,6 +205,10 @@ set -g @agents-auto-status-right 'off'
 |---|---|---|
 | `@agents-popup-key` | `o` | Popup launcher key (with prefix) |
 | `@agents-last-window-key` | _(unset)_ | Toggle to the previously-focused window across sessions (with prefix); empty = no binding |
+| `@agents-nav-prev-key` | _(unset)_ | Step to the previous active session, stable `%N` order; empty = no binding |
+| `@agents-nav-next-key` | _(unset)_ | Step to the next active session; empty = no binding |
+| `@agents-nav-key-table` | `root` | Key table for the nav keys: `root` (no prefix) or `prefix` |
+| `@agents-nav-indicator` | `off` | Flash `name (i/n)` on navigation |
 | `@agents-popup-width` | `70%` | Popup width |
 | `@agents-popup-height` | `50%` | Popup height |
 | `@agents-popup-border` | `rounded` | Popup border style |
@@ -194,6 +223,7 @@ Internal options (managed by the server):
 - `@agents-codex-pill` — Codex state and count
 - `@agents-gen` — generation counter for picker reload
 - `@agents-server-ts` — server heartbeat
+- `@agents-nav-cursor` — `%N` of the last-navigated session (the nav ring cursor; set by the nav keys)
 
 Environment variables:
 

@@ -39,7 +39,8 @@ func initSchema(db *sql.DB) error {
 			name       TEXT,
 			dir        TEXT,
 			updated    INTEGER,
-			host       TEXT NOT NULL DEFAULT 'local'
+			host       TEXT NOT NULL DEFAULT 'local',
+			pane_id    TEXT
 		);
 
 		CREATE TABLE IF NOT EXISTS recent (
@@ -62,7 +63,15 @@ func initSchema(db *sql.DB) error {
 			PRIMARY KEY(tool, session_id)
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: add pane_id to a panes table created before this column existed.
+	// On a freshly-created table (above) the column is already present, so this
+	// errors with "duplicate column name" — benign and intentionally ignored.
+	_, _ = db.Exec(`ALTER TABLE panes ADD COLUMN pane_id TEXT`)
+	return nil
 }
 
 func (db *DB) CacheName(tool Tool, sessionID, name, dir string) error {
@@ -122,15 +131,15 @@ func (db *DB) WriteSnapshot(panes []PaneRow, recent []RecentRow) error {
 	}
 
 	pStmt, err := tx.Prepare(`INSERT OR REPLACE INTO panes
-		(target, tool, state, session_id, name, dir, updated, host)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		(target, tool, state, session_id, name, dir, updated, host, pane_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer pStmt.Close()
 
 	for _, p := range panes {
-		if _, err := pStmt.Exec(p.Target, p.Tool, p.State, p.SessionID, p.Name, p.Dir, p.Updated, p.Host); err != nil {
+		if _, err := pStmt.Exec(p.Target, p.Tool, p.State, p.SessionID, p.Name, p.Dir, p.Updated, p.Host, p.PaneID); err != nil {
 			return err
 		}
 	}

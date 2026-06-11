@@ -140,6 +140,9 @@ func main() {
 
 	// Pane scanner: discover unwrapped sessions, prune dead panes.
 	go tmux.RunScanner(ctx, 5*time.Second, tmux.ScannerCallbacks{
+		// Publish the target→pane-id (%N) map each scan; the reconciler stamps
+		// PaneRow.PaneID from it without a per-event shell-out.
+		OnPanesListed: reconciler.SetPaneIDs,
 		IsClaudeTracked: func(target string) bool {
 			for _, s := range claudeStore.All() {
 				if s.PaneTarget == target {

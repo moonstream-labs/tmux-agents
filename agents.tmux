@@ -49,6 +49,24 @@ if [[ -n "$LAST_WINDOW_KEY" ]]; then
     fi
 fi
 
+# --- Active-session navigation (opt-in) ------------------------------------
+# prev/next step through the active agent sessions in stable %N order. Binds are
+# idempotent (overwrite). Default key table is "root" (-n): no prefix, intercepts
+# before the focused pane -- required for the dev1 Cmd+[/] case, where the keys
+# arrive as C-S-,/. and must beat any in-pane consumer. Set @agents-nav-key-table
+# to "prefix" where a dedicated no-prefix key can't be emitted.
+NAV_PREV_KEY=$(get_tmux_option "$AGENTS_NAV_PREV_KEY_OPTION" "$AGENTS_NAV_PREV_KEY_DEFAULT")
+NAV_NEXT_KEY=$(get_tmux_option "$AGENTS_NAV_NEXT_KEY_OPTION" "$AGENTS_NAV_NEXT_KEY_DEFAULT")
+NAV_KEY_TABLE=$(get_tmux_option "$AGENTS_NAV_KEY_TABLE_OPTION" "$AGENTS_NAV_KEY_TABLE_DEFAULT")
+nav_root=()
+[[ "$NAV_KEY_TABLE" == "root" ]] && nav_root=(-n)
+if [[ -n "$NAV_PREV_KEY" ]]; then
+    tmux bind-key "${nav_root[@]}" "$NAV_PREV_KEY" run-shell -b "$SCRIPTS_DIR/navigate.sh prev '#{client_name}'"
+fi
+if [[ -n "$NAV_NEXT_KEY" ]]; then
+    tmux bind-key "${nav_root[@]}" "$NAV_NEXT_KEY" run-shell -b "$SCRIPTS_DIR/navigate.sh next '#{client_name}'"
+fi
+
 # --- Ensure Go server is running ---
 ensure_server_running || true
 

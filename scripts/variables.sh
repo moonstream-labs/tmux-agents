@@ -13,6 +13,29 @@ AGENTS_POPUP_KEY_DEFAULT="o"
 AGENTS_LAST_WINDOW_KEY_OPTION="@agents-last-window-key"
 AGENTS_LAST_WINDOW_KEY_DEFAULT=""
 
+# --- Active-session navigation (opt-in: empty = no binding) ---
+# prev/next step through the active agent sessions in stable pane-id (%N) order.
+AGENTS_NAV_PREV_KEY_OPTION="@agents-nav-prev-key"
+AGENTS_NAV_PREV_KEY_DEFAULT=""
+AGENTS_NAV_NEXT_KEY_OPTION="@agents-nav-next-key"
+AGENTS_NAV_NEXT_KEY_DEFAULT=""
+
+# Key table for the nav bindings: "root" (no prefix; intercepts before the pane,
+# required for the dev1 Cmd+[/] -> C-S-,/. case) or "prefix" (simpler where a
+# dedicated no-prefix key can't be emitted -- prefix keys never reach the pane,
+# so there's no app passthrough to manage).
+AGENTS_NAV_KEY_TABLE_OPTION="@agents-nav-key-table"
+AGENTS_NAV_KEY_TABLE_DEFAULT="root"
+
+# Optional on-navigation indicator: shows "name (i/n)" on the status line. Off by
+# default -- the focus change is feedback enough; position is the one thing the
+# %N order doesn't surface, hence (i/n) rather than just the name.
+AGENTS_NAV_INDICATOR_OPTION="@agents-nav-indicator"
+AGENTS_NAV_INDICATOR_DEFAULT="off"
+
+# Internal: %N of the last session navigated to (the ring cursor).
+AGENTS_NAV_CURSOR_OPTION="@agents-nav-cursor"
+
 # --- Popup styling ---
 AGENTS_POPUP_WIDTH_OPTION="@agents-popup-width"
 AGENTS_POPUP_WIDTH_DEFAULT="70%"

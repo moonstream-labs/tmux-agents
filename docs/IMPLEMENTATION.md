@@ -289,3 +289,58 @@ tmux/TPM reload, so the guard prevents duplicate appended hooks; it clears on
 server restart, exactly when the hooks themselves reset. Hooks are appended with
 `set-hook -ga`, so the tracker coexists with any future consumer of those hooks.
 The feature touches none of the server, DB, reconciler, pills, or picker.
+
+## 10. Session Navigation
+
+Prev/next keys that walk the **active** sessions (the Active set — the `panes`
+table) without the popup, jumping focus to each session's pane. Opt-in via
+`@agents-nav-prev-key` / `@agents-nav-next-key`.
+
+### Stable ordering
+
+The ring is ordered by tmux **pane id (`%N`)**, not by the Active view's
+priority→recency display sort. `%N` is monotonic by pane creation and never
+renumbered or reused for a pane's life, so a session keeps its slot until its
+pane dies — "retains relative order until the process is killed." `panes.target`
+(`session:window.pane`) can't do this: `renumber-windows on` rewrites it when a
+window closes.
+
+`pane_id` is sourced **off the hot path**. The scanner adds `#{pane_id}` to its
+existing 5s `list-panes` pass and publishes a `target→%N` map via the
+`OnPanesListed` callback — fired *before* the discovery/prune callbacks, so a
+freshly-discovered pane already sees its own `%N`. The reconciler stores the map
+and stamps `PaneRow.PaneID` from it in `Reconcile()` — no shell-out on a path
+that runs per hook/SSE event. Before the first scan the map is empty and
+`PaneID` is blank; `navigate.sh` resolves `%N` live as a fallback. (A
+target-keyed map shares a ≤5s post-`renumber` window with any other approach;
+fully escaping it would mean keying `panes` on `%N` — a `PRIMARY KEY` change,
+out of scope.)
+
+### navigate.sh
+
+Reads the state DB directly — no `ensure_server_running`, so a keypress never
+stalls on a cold start:
+
+1. Build the ring: `SELECT pane_id, target FROM panes WHERE host='local'`,
+   ordered by numeric `%N` (live `display-message` fallback for a blank
+   `pane_id`).
+2. Current position: the focused pane's `%N` if it's in the ring; else the
+   `@agents-nav-cursor` option (`%N` of the last jump — "resume from last
+   agent"); else unanchored (next → first, prev → last).
+3. Move ±1 with wrap; `switch-client` the invoking client to the target via the
+   shared `agents_switch_to_pane` helper; update `@agents-nav-cursor`.
+
+### Binding & shared helper
+
+`agents.tmux` binds the keys in the **root** table (default; intercepts before
+the pane, for a no-prefix terminal key) or the **prefix** table
+(`@agents-nav-key-table prefix`, which never reaches the pane). The invoking
+client is passed via `#{client_name}` (expanded by `run-shell`), the same
+discipline as the popup. `@agents-nav-indicator` optionally flashes `name (i/n)`.
+
+`navigate.sh` and the picker's `navigate_to_pane` both route through
+`agents_switch_to_pane` (`helpers.sh`) so the two paths can't diverge; the helper
+passes `-Z`, preserving a zoomed destination (a deliberate change from the
+picker's prior unzoom-on-select). `last-window.sh`'s `jump()` is a follow-up to
+bring onto the same form — it can't share the *sourced* helper without adding a
+fork to its hot `track()` path.

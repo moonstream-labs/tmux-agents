@@ -16,41 +16,55 @@ import (
 // PaneInfo represents a tmux pane from list-panes.
 type PaneInfo struct {
 	Target  string // session:window.pane
+	PaneID  string // pane_id (%N) — stable per pane, used for nav ordering
 	Command string // pane_current_command
 	PID     int    // pane_pid
 	CWD     string // pane_current_path
 }
 
+// listPanesFormat is the -F format for ListPanes. pane_id (%N) is last so the
+// parser can tolerate older/shorter rows.
+const listPanesFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_id}"
+
 // ListPanes returns all panes in the tmux server.
 func ListPanes() ([]PaneInfo, error) {
-	out, err := exec.Command("tmux", "list-panes", "-a",
-		"-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}",
-	).Output()
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F", listPanesFormat).Output()
 	if err != nil {
 		return nil, err
 	}
 
 	var panes []PaneInfo
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
+		if p, ok := parsePaneLine(line); ok {
+			panes = append(panes, p)
 		}
-		parts := strings.SplitN(line, "\t", 4)
-		if len(parts) < 3 {
-			continue
-		}
-		pid, _ := strconv.Atoi(parts[2])
-		p := PaneInfo{
-			Target:  parts[0],
-			Command: parts[1],
-			PID:     pid,
-		}
-		if len(parts) >= 4 {
-			p.CWD = parts[3]
-		}
-		panes = append(panes, p)
 	}
 	return panes, nil
+}
+
+// parsePaneLine parses one tmux list-panes row in listPanesFormat. The trailing
+// cwd and pane_id fields are optional, so a shorter row still parses.
+func parsePaneLine(line string) (PaneInfo, bool) {
+	if line == "" {
+		return PaneInfo{}, false
+	}
+	parts := strings.SplitN(line, "\t", 5)
+	if len(parts) < 3 {
+		return PaneInfo{}, false
+	}
+	pid, _ := strconv.Atoi(parts[2])
+	p := PaneInfo{
+		Target:  parts[0],
+		Command: parts[1],
+		PID:     pid,
+	}
+	if len(parts) >= 4 {
+		p.CWD = parts[3]
+	}
+	if len(parts) >= 5 {
+		p.PaneID = parts[4]
+	}
+	return p, true
 }
 
 // PaneExists checks if a tmux pane target is still alive.
@@ -242,6 +256,13 @@ func readCmdline(pid int) ([]string, error) {
 // ScannerCallbacks defines how the scanner notifies the main server
 // about discovered and departed panes.
 type ScannerCallbacks struct {
+	// OnPanesListed is called once per scan with a target→pane-id (%N) map built
+	// from the full list-panes pass, before any discovery/prune callback fires.
+	// The reconciler stores it and stamps PaneRow.PaneID with no per-event
+	// shell-out. It covers every pane (agent or not, tracked or not), so it has
+	// no equivalent of the discovery "already tracked → skip" gap.
+	OnPanesListed func(paneIDByTarget map[string]string)
+
 	// OnClaudeDiscovered is called when a claude pane is found that is
 	// not yet tracked. Returns true if the session was registered.
 	OnClaudeDiscovered func(target string, pid int) bool
@@ -292,6 +313,18 @@ func scanOnce(cb ScannerCallbacks) {
 	panes, err := ListPanes()
 	if err != nil {
 		return
+	}
+
+	// Publish the target→pane-id map first, so any pane discovered below already
+	// sees its own %N when its discovery triggers a reconcile.
+	if cb.OnPanesListed != nil {
+		ids := make(map[string]string, len(panes))
+		for _, p := range panes {
+			if p.PaneID != "" {
+				ids[p.Target] = p.PaneID
+			}
+		}
+		cb.OnPanesListed(ids)
 	}
 
 	// Build set of panes running claude or opencode.
