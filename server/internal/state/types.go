@@ -19,6 +19,7 @@ const (
 
 type PaneRow struct {
 	Target    string
+	PaneID    string // tmux pane id (%N); stable per pane, drives nav ordering
 	Tool      Tool
 	State     SessionState
 	SessionID string

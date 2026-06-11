@@ -25,6 +25,7 @@ type Reconciler struct {
 	recents   *Recents
 	gen       int
 	prevPill  map[Tool]string
+	paneIDs   map[string]string // target→pane-id (%N), published by the scanner
 }
 
 func NewReconciler(db *DB, opts *tmux.Options) *Reconciler {
@@ -42,6 +43,15 @@ func (r *Reconciler) RegisterProvider(p PaneProvider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers = append(r.providers, p)
+}
+
+// SetPaneIDs publishes the latest target→pane-id (%N) map from the scanner's
+// list-panes pass. Reconcile() reads it to stamp PaneRow.PaneID with no
+// per-event shell-out. Safe to call concurrently with Reconcile().
+func (r *Reconciler) SetPaneIDs(m map[string]string) {
+	r.mu.Lock()
+	r.paneIDs = m
+	r.mu.Unlock()
 }
 
 // AddRecent records an ended session in the recent list (most-recent first).
@@ -64,6 +74,17 @@ func (r *Reconciler) Reconcile() {
 	for _, p := range r.providers {
 		allPanes = append(allPanes, p.ActivePanes()...)
 	}
+
+	// Stamp pane ids (%N) from the scanner-published map (in-memory; no shell-out
+	// on this hot path). A target missing from the map — including before the
+	// first scan, when paneIDs is nil — leaves PaneID empty; navigate.sh's live
+	// fallback covers that gap.
+	for i := range allPanes {
+		if pid := r.paneIDs[allPanes[i].Target]; pid != "" {
+			allPanes[i].PaneID = pid
+		}
+	}
+
 	allRecent := r.recents.Rows()
 
 	// Compute per-tool pills.
