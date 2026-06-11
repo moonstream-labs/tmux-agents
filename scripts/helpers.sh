@@ -63,3 +63,20 @@ ensure_server_running() {
 
     return 1
 }
+
+# agents_switch_to_pane <pane-target> [client]
+# Switch <client> (or the current client when empty) to an existing pane in one
+# step: switch-client -t accepts a pane target (one containing ':', '.', or '%')
+# and changes session+window+pane together, moving only that client -- no
+# preparatory global window/pane selection in the destination. -Z preserves a
+# zoomed destination so the jump matches what the popup shows.
+#
+# Both nav paths -- the popup's selection (navigate_to_pane in
+# _navigator_picker.sh) and the prev/next keys (navigate.sh) -- MUST route
+# through here so the two cannot diverge.
+agents_switch_to_pane() {
+    local target="$1" client="${2:-}"
+    local cflag=()
+    [[ -n "$client" ]] && cflag=(-c "$client")
+    tmux switch-client "${cflag[@]}" -Z -t "$target" 2>/dev/null || true
+}

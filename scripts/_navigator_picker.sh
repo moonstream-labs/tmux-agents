@@ -237,15 +237,12 @@ lookup_active_target() {
 }
 
 # navigate_to_pane <target> -- switch the *invoking* client (SRC_CLIENT) to an
-# existing pane (session:window.pane). switch-client -t accepts a pane target (a
-# target containing ':', '.' or '%') as a special case and changes session,
-# window, and pane in one step -- so only the invoking client moves, with no
-# preparatory global window/pane selection in the destination session.
+# existing pane. Thin wrapper over the shared agents_switch_to_pane helper
+# (helpers.sh), so the popup and the prev/next nav keys (navigate.sh) share one
+# implementation and cannot drift. NOTE: via the helper this now preserves a
+# zoomed destination (-Z); previously switching here unzoomed the target window.
 navigate_to_pane() {
-  local target="$1"
-  local cflag=()
-  [[ -n "$SRC_CLIENT" ]] && cflag=(-c "$SRC_CLIENT")
-  tmux switch-client "${cflag[@]}" -t "$target" 2>/dev/null || true
+  agents_switch_to_pane "$1" "$SRC_CLIENT"
 }
 
 # resume_dir <recorded_dir> -- where a resumed session should open: the recorded
