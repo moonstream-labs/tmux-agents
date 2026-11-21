@@ -73,21 +73,13 @@ ensure_server_running || true
 # --- Status line (optional auto-append mode) ---
 AUTO_STATUS_RIGHT=$(get_tmux_option "$AGENTS_AUTO_STATUS_RIGHT_OPTION" "$AGENTS_AUTO_STATUS_RIGHT_DEFAULT")
 if [[ "$AUTO_STATUS_RIGHT" == "on" || "$AUTO_STATUS_RIGHT" == "yes" || "$AUTO_STATUS_RIGHT" == "true" ]]; then
+    # Appends the single combined pill (all tools in one). The per-tool scripts
+    # (status_claude.sh / status_opencode.sh / status_codex.sh) remain available
+    # for manual composition.
     CURRENT_STATUS_RIGHT=$(tmux show-option -gqv "status-right")
+    AGENTS_FRAGMENT="#($SCRIPTS_DIR/status_agents.sh)"
 
-    OC_FRAGMENT="#($SCRIPTS_DIR/status_opencode.sh)"
-    CC_FRAGMENT="#($SCRIPTS_DIR/status_claude.sh)"
-    CX_FRAGMENT="#($SCRIPTS_DIR/status_codex.sh)"
-
-    if [[ "$CURRENT_STATUS_RIGHT" != *"$OC_FRAGMENT"* ]]; then
-        CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${OC_FRAGMENT}"
+    if [[ "$CURRENT_STATUS_RIGHT" != *"$AGENTS_FRAGMENT"* ]]; then
+        tmux set-option -g status-right "${CURRENT_STATUS_RIGHT} ${AGENTS_FRAGMENT}"
     fi
-    if [[ "$CURRENT_STATUS_RIGHT" != *"$CX_FRAGMENT"* ]]; then
-        CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${CX_FRAGMENT}"
-    fi
-    if [[ "$CURRENT_STATUS_RIGHT" != *"$CC_FRAGMENT"* ]]; then
-        CURRENT_STATUS_RIGHT="${CURRENT_STATUS_RIGHT} ${CC_FRAGMENT}"
-    fi
-
-    tmux set-option -g status-right "$CURRENT_STATUS_RIGHT"
 fi

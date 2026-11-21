@@ -5,14 +5,15 @@ A tmux plugin for navigating active and recent Claude Code, OpenCode, and Codex 
 Provides:
 
 - a popup navigator (`prefix + o`)
-- per-tool status pills for Claude Code (󰚩), OpenCode (), and Codex (✦)
+- one combined status pill covering all three tools
+- optional per-tool status pills for Claude Code (󰚩), OpenCode (), and Codex (✦)
 - push-based session tracking via a Go background server
 
 ## Features
 
 - **Active view**: shows currently attached agent panes with live state (running, permission, idle)
 - **Recent view**: ended sessions from all three tools, newest first, with one-key resume (`claude -r` / `opencode -s` / `codex resume`)
-- **Per-tool status pills**: independent indicators for each tool in the tmux status line
+- **Status pill**: one combined indicator for all three tools in the tmux status line (independent per-tool pills are also available)
 - **Push-based state**: Claude Code hooks, OpenCode SSE, and Codex hooks — no screen scraping
 - **Shell wrappers**: `claude`, `opencode`, and `codex` shell functions shadow the real binaries for named session launch with automatic registration (`command <tool>` bypasses them)
 - **Fallback discovery**: pane scanner finds sessions started without wrappers
@@ -80,7 +81,19 @@ set -g @plugin 'moonstream-labs/tmux-agents'
 run-shell ~/.local/share/tmux/plugins/tmux-agents/agents.tmux
 ```
 
-### Status modules (manual composition, recommended)
+### Status pill (manual composition, recommended)
+
+One combined pill for all three tools:
+
+```tmux
+set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_agents.sh)"
+```
+
+It shows the most urgent state present across every tool — a permission prompt,
+then running, then idle sessions — and the number of sessions in that state.
+Which tool a session belongs to is shown per row in the navigator picker.
+
+To show a separate pill per tool instead, compose the per-tool scripts:
 
 ```tmux
 set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_opencode.sh)"
@@ -88,11 +101,13 @@ set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/stat
 set -ag status-right "#($HOME/.local/share/tmux/plugins/tmux-agents/scripts/status_claude.sh)"
 ```
 
-### Status modules (automatic append)
+### Status pill (automatic append)
 
 ```tmux
 set -g @agents-auto-status-right 'on'
 ```
+
+Appends the combined pill to `status-right`.
 
 ## Usage
 
@@ -214,7 +229,7 @@ set -g @agents-auto-status-right 'off'
 | `@agents-popup-border` | `rounded` | Popup border style |
 | `@agents-popup-bg` | `#080909` | Popup background |
 | `@agents-popup-fg` | `#dadada` | Popup foreground |
-| `@agents-auto-status-right` | `off` | Auto-append status modules |
+| `@agents-auto-status-right` | `off` | Auto-append the combined status pill |
 
 Internal options (managed by the server):
 
@@ -238,7 +253,7 @@ See `docs/IMPLEMENTATION.md` for full details.
 
 - **Popup doesn't open**: verify keybind with `tmux show-options -g | grep @agents-popup-key`
 - **No rows in picker**: check server health with `curl http://127.0.0.1:7077/healthz`
-- **Pills missing**: ensure status modules are in `status-right`
+- **Pill missing**: ensure `status_agents.sh` (or the per-tool scripts) is in `status-right`
 - **Sessions not appearing**: check `systemctl --user status tmux-agents` and server logs via `journalctl --user -u tmux-agents`
 - **Claude sessions unnamed**: sessions started without the `claude` wrapper have no name until `/rename` is used
 

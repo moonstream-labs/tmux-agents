@@ -10,7 +10,7 @@
 
 3. **`scripts/_navigator_picker.sh`** — Renders Active/Recent views from state DB. Hosts interactive fzf picker. Routes selection actions per tool.
 
-4. **Status pill scripts** — `status_claude.sh` (󰚩), `status_opencode.sh` (), and `status_codex.sh` (✦). Read per-tool pill options.
+4. **Status pill scripts** — `status_claude.sh` (󰚩), `status_opencode.sh` (), and `status_codex.sh` (✦). Read per-tool pill options. `status_agents.sh` folds the three into one combined pill and is what auto-append mode adds.
 
 ## 2. Go Server Architecture
 
@@ -88,6 +88,17 @@ CREATE TABLE session_names (   -- persistent name cache; survives restarts
 - `@agents-codex-pill` — format: `state|count`
 - `@agents-gen` — monotonic counter, incremented on any state change
 - `@agents-server-ts` — unix epoch heartbeat
+
+### Combined pill
+
+`status_agents.sh` renders one pill for all tools from the three per-tool
+options; there is no server-side aggregate option. It takes the highest-priority
+state present (`permission` > `running` > `active`) and sums the counts of the
+tools reporting that state. Each per-tool count is already "sessions in that
+tool's top state", so the result equals `computePill` run over every pane at
+once. The three options are read in a single chained `tmux` invocation. Any
+per-tool change already bumps `@agents-gen` and refreshes clients, so the
+combined pill needs no change detection of its own.
 
 ## 3. Claude Code Integration
 
