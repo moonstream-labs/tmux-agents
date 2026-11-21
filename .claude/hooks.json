@@ -1,16 +1,5 @@
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "http",
-            "url": "http://127.0.0.1:7077/claude/hook",
-            "async": true
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [

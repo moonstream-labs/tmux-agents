@@ -30,7 +30,6 @@ echo ""
 cat << 'HOOKS'
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:7077/claude/hook", "async": true}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:7077/claude/hook", "async": true}]}],
     "PreToolUse": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:7077/claude/hook", "async": true}]}],
     "PermissionRequest": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:7077/claude/hook", "async": true}]}],

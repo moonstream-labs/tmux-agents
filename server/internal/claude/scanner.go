@@ -61,8 +61,22 @@ func ScanActiveSessions(store *Store) {
 
 		sess := store.Register(sf.SessionID, sf.CWD)
 		sess.State = state.StateUnknown
+		sess.PID = sf.PID
 		log.Printf("claude: recovered session id=%s cwd=%s pid=%d", sf.SessionID, sf.CWD, sf.PID)
 	}
+}
+
+// HasTranscript reports whether a session has a transcript on disk. The
+// throwaway id `claude --resume` runs under while its picker is open never gets
+// one, which is how a displaced placeholder is told apart from a real session
+// that ended.
+func HasTranscript(sessionID string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || sessionID == "" {
+		return false
+	}
+	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
+	return err == nil && len(matches) > 0
 }
 
 // ScanSessionTitle reads the JSONL file for a session and extracts

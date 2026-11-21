@@ -1,6 +1,11 @@
 package tmux
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestCodexSessionIDFromRollout(t *testing.T) {
 	cases := []struct {
@@ -54,5 +59,72 @@ func TestParsePaneLine(t *testing.T) {
 				t.Errorf("parsePaneLine(%q) = %+v, want %+v", c.line, got, c.want)
 			}
 		})
+	}
+}
+
+func TestIsDescendant(t *testing.T) {
+	self, parent := os.Getpid(), os.Getppid()
+	if !isDescendant(self, self) {
+		t.Error("a process counts as its own descendant")
+	}
+	if !isDescendant(self, parent) {
+		t.Error("this process descends from its parent")
+	}
+	if isDescendant(parent, self) {
+		t.Error("the parent does not descend from this process")
+	}
+	if isDescendant(0x7ffffff0, parent) {
+		t.Error("a pid with no /proc entry is not a descendant")
+	}
+}
+
+// A claude process rewrites ~/.claude/sessions/<pid>.json when it switches
+// session (`--resume` picker, /clear). The scanner must see the new id on its
+// next pass, through the known-pid fast path as well as the tree walk.
+func TestClaudeSessionForPaneRereadsChangedSessionID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	self := os.Getpid()
+	file := filepath.Join(dir, fmt.Sprintf("%d.json", self))
+	write := func(id string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":"/x"}`, self, id)
+		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// First sight: nothing known yet; claude is the pane's own process.
+	write("placeholder")
+	sf := ClaudeSessionForPane(self, 0)
+	if sf == nil || sf.SessionID != "placeholder" || sf.PID != self {
+		t.Fatalf("first sight = %+v, want placeholder / pid %d", sf, self)
+	}
+
+	// The process switches session. Re-check via the fast path: the known pid
+	// is alive under the pane (our parent stands in for the pane's shell).
+	write("real")
+	sf = ClaudeSessionForPane(os.Getppid(), self)
+	if sf == nil || sf.SessionID != "real" {
+		t.Fatalf("fast-path re-check = %+v, want real", sf)
+	}
+
+	// A known pid that is not a live process under the pane is ignored and the
+	// tree walk is used instead.
+	sf = ClaudeSessionForPane(self, 0x7ffffff0)
+	if sf == nil || sf.SessionID != "real" {
+		t.Fatalf("stale known pid = %+v, want real via the tree walk", sf)
+	}
+
+	// No session file (yet): nothing to bind.
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if sf := ClaudeSessionForPane(self, self); sf != nil {
+		t.Fatalf("no session file should yield nil, got %+v", sf)
 	}
 }

@@ -32,7 +32,7 @@ main
  ├─ tmux.RunScanner            (periodic 5s: pane discovery + target assignment)
  ├─ [per OC instance] sse.Client (GET /event on OpenCode server)
  ├─ heartbeat ticker           (1s: write @agents-server-ts)
- └─ pending prune ticker       (30s: remove stale pre-registrations)
+ └─ pending prune ticker       (30s: remove stale pre-registrations and silent pane-less sessions)
 ```
 
 ### State Flow
@@ -108,7 +108,6 @@ Claude Code hooks (`type: "http"`, `async: true`) POST JSON to `/claude/hook`. C
 
 | Hook Event | State Transition |
 |---|---|
-| `SessionStart` | Register → idle |
 | `UserPromptSubmit` | → running |
 | `PreToolUse` | → running (reinforces) |
 | `PermissionRequest` | → permission |
@@ -116,17 +115,50 @@ Claude Code hooks (`type: "http"`, `async: true`) POST JSON to `/claude/hook`. C
 | `Stop` | → idle |
 | `SessionEnd` | Remove → recent |
 
+`SessionStart` is deliberately not configured. Claude Code does not deliver it to
+`http` hooks — across three months of server logs not one arrived, against over
+a hundred `SessionEnd`s — so the pane scanner is what registers a session. The
+handler still accepts a `SessionStart` if one is wired as a command hook.
+
+Hooks carry no pane, so a hook never binds one. A hook for a session that is not
+bound yet creates it pane-less and records the state (`Store.Ensure` +
+`SetState`); the scanner's next pass binds the pane with that state intact, so
+the event is held rather than dropped. Pane-less sessions (Claude running outside
+tmux, headless runs) are invisible, never enter Recent, and are pruned after 10
+minutes of silence.
+
 ### Session Identity
 
 - Hook payloads include `session_id` (UUID) and `cwd`
 - Active sessions discoverable from `~/.claude/sessions/<pid>.json`
+- **A claude process does not keep one session id for life.** `claude --resume`
+  runs under a throwaway id (one with no transcript) while its picker is open,
+  then rewrites `<pid>.json` with the chosen session's id; `/clear` starts a new
+  id the same way
 - Session names stored as `custom-title` entries in `~/.claude/projects/<project>/<sessionId>.jsonl`
 
 ### Pane Correlation
 
-1. The `claude` shell wrapper (which shadows the real binary and injects `--dangerously-skip-permissions`) pre-registers `{name, pane_target, cwd}` via `POST /claude/register`
-2. When `SessionStart` hook fires, server matches by pane target verification or CWD
-3. Pane scanner fallback: walks process tree from pane PID, finds `~/.claude/sessions/<pid>.json`
+The pane scanner is the only thing that binds a pane to a session. On **every**
+pass, for **every** pane running `claude`, it resolves which session the pane's
+process is running *now* and calls `Store.Bind`:
+
+1. First sight: walk the pane's process tree to the claude pid and read its
+   `~/.claude/sessions/<pid>.json`.
+2. Later passes: re-read that pid's file directly — one file read. The tree walk
+   is the fallback when the pid is no longer alive under the pane.
+3. `Bind` keeps pane↔session one-to-one: a *different* session bound to the pane
+   is displaced. A displaced session with a transcript goes to Recent; one
+   without (the `--resume` placeholder) is simply dropped.
+
+The re-check is what keeps a pane from sticking. Checked only once, a pane first
+seen during the `--resume` picker stays bound to the throwaway id forever, and
+every later hook — which arrives under the live id — misses it: the session
+shows unnamed and idle no matter what it is doing.
+
+The `claude` shell wrapper (which shadows the real binary and injects
+`--dangerously-skip-permissions`) pre-registers `{name, pane_target, cwd}` via
+`POST /claude/register`; `Bind` claims that name by exact pane target.
 
 ### Title Propagation
 
@@ -239,7 +271,7 @@ hash, so editing the shim command requires re-trusting.
 
 Background goroutine (5s interval) runs `tmux list-panes -a`. For each pane:
 
-- Running `claude`: walks `/proc` tree to find `~/.claude/sessions/<pid>.json`, assigns pane target to existing session or registers new one
+- Running `claude`: on every pass, resolves the session the pane's process is running now from `~/.claude/sessions/<pid>.json` and (re)binds the pane to it (see Pane Correlation)
 - Running `opencode`: discovers `--port` flag from `/proc/<pid>/cmdline`, registers SSE connection
 - Running `codex`: resolves the exact session id from the codex process's open rollout fd, registers the (idle) session, and titles it from the threads DB by id; state comes from hooks; the session is pruned when the pane disappears (Codex has no `SessionEnd`)
 

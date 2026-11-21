@@ -94,7 +94,8 @@ func main() {
 			"status":             "ok",
 			"version":            version,
 			"uptime":             time.Since(startTime).Seconds(),
-			"claude_sessions":    len(claudeStore.All()),
+			"claude_sessions":    len(claudeStore.ActivePanes()),
+			"claude_unbound":     len(claudeStore.All()) - len(claudeStore.ActivePanes()),
 			"opencode_instances": len(opencodeStore.Ports()),
 			"codex_sessions":     len(codexStore.All()),
 		})
@@ -133,6 +134,7 @@ func main() {
 				return
 			case <-ticker.C:
 				claudeStore.PruneStalePending(2 * time.Minute)
+				claudeStore.PrunePaneless(10 * time.Minute)
 				codexStore.PruneStalePending(2 * time.Minute)
 			}
 		}
@@ -143,14 +145,6 @@ func main() {
 		// Publish the target→pane-id (%N) map each scan; the reconciler stamps
 		// PaneRow.PaneID from it without a per-event shell-out.
 		OnPanesListed: reconciler.SetPaneIDs,
-		IsClaudeTracked: func(target string) bool {
-			for _, s := range claudeStore.All() {
-				if s.PaneTarget == target {
-					return true
-				}
-			}
-			return false
-		},
 		IsOpenCodeTracked: func(target string) bool {
 			for _, p := range opencodeStore.Ports() {
 				inst, ok := opencodeStore.Get(p)
@@ -160,34 +154,41 @@ func main() {
 			}
 			return false
 		},
-		OnClaudeDiscovered: func(target string, pid int) bool {
-			// The pane PID is the shell; claude is a child. Try the pane PID
-			// itself first (when claude is the direct pane command), then
-			// search child PIDs for a matching session file.
-			sf := tmux.FindClaudeSessionForPaneTree(pid)
+		OnClaudePane: func(target string, pid int) {
+			// Which session is the claude process in this pane running NOW?
+			// Checked on every scan, not just the first: the process can switch
+			// session id (`claude --resume` runs under a throwaway id while its
+			// picker is open; /clear starts a new one). The pid from the last
+			// scan makes the re-check a single file read.
+			cur, tracked := claudeStore.SessionForTarget(target)
+			sf := tmux.ClaudeSessionForPane(pid, cur.PID)
 			if sf == nil {
-				return false
+				return
+			}
+			if tracked && cur.ID == sf.SessionID && cur.PID == sf.PID {
+				return // unchanged -- the common case
 			}
 
-			// Check if we already know this session (e.g., from startup recovery)
-			// and just need to assign the pane target.
-			if existing, ok := claudeStore.Get(sf.SessionID); ok {
-				if existing.PaneTarget == "" {
-					claudeStore.SetPaneTarget(sf.SessionID, target)
-					reconciler.Reconcile()
-					log.Printf("scanner: assigned pane=%s to existing claude session=%s", target, sf.SessionID)
+			sess, displaced, changed := claudeStore.Bind(sf.SessionID, sf.CWD, target, sf.PID)
+			if displaced != nil {
+				// The pane's previous session id is gone. A real session that
+				// ended belongs in Recent; a --resume placeholder (no transcript)
+				// does not.
+				if claude.HasTranscript(displaced.ID) {
+					reconciler.AddRecent(state.ToolClaude, displaced.ID, displaced.Name, displaced.CWD, target)
 				}
-				return true
+				log.Printf("scanner: pane=%s switched claude session %s -> %s", target, displaced.ID, sf.SessionID)
 			}
-
-			sess := claudeStore.Register(sf.SessionID, sf.CWD)
-			sess.PaneTarget = target
-			if title, err := claude.ScanSessionTitle(sf.SessionID); err == nil && title != "" {
-				claudeStore.UpdateName(sf.SessionID, title)
+			if sess.Name == "" {
+				if title, err := claude.ScanSessionTitle(sf.SessionID); err == nil && title != "" {
+					claudeStore.UpdateName(sf.SessionID, title)
+					changed = true
+				}
 			}
-			reconciler.Reconcile()
-			log.Printf("scanner: discovered claude session=%s pane=%s", sf.SessionID, target)
-			return true
+			if changed {
+				reconciler.Reconcile()
+				log.Printf("scanner: bound claude session=%s pane=%s", sf.SessionID, target)
+			}
 		},
 		OnOpenCodeDiscovered: func(target string, port int) bool {
 			ocCtx, ocCancel := context.WithCancel(ctx)

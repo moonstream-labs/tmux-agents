@@ -125,7 +125,75 @@ func ReadClaudeSessionByPID(pid int) (*ClaudeSessionFile, error) {
 	if err := json.Unmarshal(data, &sf); err != nil {
 		return nil, err
 	}
+	if sf.PID == 0 {
+		sf.PID = pid
+	}
 	return &sf, nil
+}
+
+// ClaudeSessionForPane returns the session file of the claude process running
+// under a pane, or nil if there is none (yet).
+//
+// knownPID, when non-zero, is the claude pid an earlier scan found for this
+// pane. If that process is still alive under the pane its session file is
+// re-read directly -- one file read, no process-tree walk -- which is what makes
+// it cheap to re-check every claude pane on every scan. Anything else (first
+// sight, the process exited, a new claude started in the pane) falls back to
+// walking the pane's process tree.
+//
+// The re-read matters because a claude process does not keep one session id for
+// life: `claude --resume` runs under a throwaway id while its picker is open
+// and rewrites this file when a session is chosen; /clear does the same.
+func ClaudeSessionForPane(panePID, knownPID int) *ClaudeSessionFile {
+	if knownPID != 0 && isDescendant(knownPID, panePID) {
+		if sf, err := ReadClaudeSessionByPID(knownPID); err == nil && sf.SessionID != "" {
+			return sf
+		}
+	}
+	if sf := FindClaudeSessionForPaneTree(panePID); sf != nil && sf.SessionID != "" {
+		return sf
+	}
+	return nil
+}
+
+// isDescendant reports whether pid is ancestor itself or a live process
+// descended from it, by following parent pids through /proc. A dead pid (no
+// /proc entry) is not a descendant.
+func isDescendant(pid, ancestor int) bool {
+	for depth := 0; pid > 1 && depth < 64; depth++ {
+		if pid == ancestor {
+			return true
+		}
+		ppid, ok := parentPID(pid)
+		if !ok {
+			return false
+		}
+		pid = ppid
+	}
+	return false
+}
+
+// parentPID reads a process's parent pid from /proc/<pid>/stat. The comm field
+// is parenthesised and may itself contain spaces or parentheses, so fields are
+// counted from the LAST ')'.
+func parentPID(pid int) (int, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	i := strings.LastIndexByte(string(data), ')')
+	if i < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(string(data[i+1:])) // state, ppid, ...
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, false
+	}
+	return ppid, true
 }
 
 // DiscoverOpenCodePort attempts to find the --port flag from
@@ -263,9 +331,13 @@ type ScannerCallbacks struct {
 	// no equivalent of the discovery "already tracked → skip" gap.
 	OnPanesListed func(paneIDByTarget map[string]string)
 
-	// OnClaudeDiscovered is called when a claude pane is found that is
-	// not yet tracked. Returns true if the session was registered.
-	OnClaudeDiscovered func(target string, pid int) bool
+	// OnClaudePane is called for EVERY pane running claude, on every scan --
+	// tracked or not. The server resolves which session the pane's process is
+	// running now and (re)binds it. It must not be gated on "already tracked":
+	// a claude process can switch session id after it was first seen
+	// (`--resume` picker, /clear), and a pane checked only once stays bound to
+	// the dead id forever.
+	OnClaudePane func(target string, pid int)
 
 	// OnOpenCodeDiscovered is called when an opencode pane with a known
 	// port is found that is not yet tracked.
@@ -277,10 +349,6 @@ type ScannerCallbacks struct {
 	// session id from the codex process's open rollout file and refresh the
 	// title from Codex's threads DB.
 	OnCodexDiscovered func(target, cwd string, pid int)
-
-	// IsClaudeTracked returns true if the given pane target is already
-	// tracked as a Claude Code session.
-	IsClaudeTracked func(target string) bool
 
 	// IsOpenCodeTracked returns true if the given pane target is already
 	// tracked as an OpenCode session.
@@ -334,11 +402,8 @@ func scanOnce(cb ScannerCallbacks) {
 		switch p.Command {
 		case "claude":
 			agentPanes[p.Target] = true
-			if cb.IsClaudeTracked != nil && cb.IsClaudeTracked(p.Target) {
-				continue
-			}
-			if cb.OnClaudeDiscovered != nil {
-				cb.OnClaudeDiscovered(p.Target, p.PID)
+			if cb.OnClaudePane != nil {
+				cb.OnClaudePane(p.Target, p.PID)
 			}
 
 		case "opencode":
